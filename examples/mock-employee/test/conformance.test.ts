@@ -1,4 +1,4 @@
-import { runConformanceSuite } from '@cruzclaw/voice-core';
-import { createMockHarness } from '../src/index.ts';
+import { runConformanceSuite } from '@cruzclaw/voice-core/conformance';
+import { createMockHarness } from '../src/index.js';
 
 runConformanceSuite('mock-employee', createMockHarness);

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { hashPayload, parseVoiceFeatureConfig } from '../src/index.ts';
+import { hashPayload, parseVoiceFeatureConfig } from '../src/index.js';
 
 describe('hashPayload', () => {
   it('ignores key order', () => {

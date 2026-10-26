@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { hashPayload } from './hash.ts';
-import { HostError, type ProgressEvent, type TaskRequest, type VoiceEmployeeHost } from './types.ts';
+import { hashPayload } from './hash.js';
+import { HostError, type ProgressEvent, type TaskRequest, type VoiceEmployeeHost } from './types.js';
 
 /**
  * What a host implementation provides so the suite can drive it. Everything

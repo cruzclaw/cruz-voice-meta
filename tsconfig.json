@@ -3,14 +3,29 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "allowImportingTsExtensions": true,
     "noEmit": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@cruzclaw/voice-core": [
+        "packages/voice-core/src/index.ts"
+      ],
+      "@cruzclaw/voice-core/conformance": [
+        "packages/voice-core/src/conformance-entry.ts"
+      ]
+    }
   },
-  "include": ["packages/*/src", "packages/*/test", "examples/*/src", "examples/*/test"]
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "examples/*/src",
+    "examples/*/test"
+  ]
 }

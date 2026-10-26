@@ -1,7 +1,7 @@
-import type { ConformanceHarness } from '@cruzclaw/voice-core';
-import { MockEmployeeBackend } from './mock-host.ts';
+import type { ConformanceHarness } from '@cruzclaw/voice-core/conformance';
+import { MockEmployeeBackend } from './mock-host.js';
 
-export { MockEmployeeBackend } from './mock-host.ts';
+export { MockEmployeeBackend } from './mock-host.js';
 
 /** Wires the mock into the shared conformance suite. */
 export function createMockHarness(): ConformanceHarness {
