@@ -1,0 +1,9 @@
+{
+  "name": "@cruzclaw/voice-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Versioned VoiceEmployeeHost contract, DTOs and conformance suite.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts"
+}
