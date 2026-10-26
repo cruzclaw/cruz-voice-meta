@@ -22,6 +22,19 @@ jobs:
       - run: npm test
       - run: npm run build -w @cruzclaw/voice-core
 
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - name: Check dependency licenses
+        run: npx --yes license-checker-rseidelsohn@5.0.1 --summary --failOn "GPL-2.0;GPL-3.0;AGPL-3.0"
+
   secrets:
     runs-on: ubuntu-latest
     steps:

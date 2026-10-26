@@ -1,0 +1,50 @@
+name: release
+
+# Runs only for a version tag. Builds the voice-core tarball, records its
+# checksum and SBOM, attests build provenance, and attaches all of it to a
+# GitHub release. The private host pins the tarball by URL and checksum.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check the tag matches the package version
+        run: |
+          pkg="v$(node -p "require('./packages/voice-core/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$pkg" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match package version $pkg" >&2
+            exit 1
+          fi
+      - run: npm run build -w @cruzclaw/voice-core
+      - name: Pack, checksum and SBOM
+        run: |
+          mkdir -p out
+          npm pack -w @cruzclaw/voice-core --pack-destination out
+          (cd out && sha256sum *.tgz > SHA256SUMS)
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1 --output-file out/sbom.cdx.json --output-format JSON
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*.tgz
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.tgz
+            out/SHA256SUMS
+            out/sbom.cdx.json
+          generate_release_notes: true
