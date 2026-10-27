@@ -115,8 +115,19 @@ export class MetaReasoner implements Reasoner {
 
   async *respond(input: ReasonerInput, signal: AbortSignal): AsyncIterable<ReasonerEvent> {
     if (signal.aborted) return;
+    // A real timer, not AbortSignal.timeout: that one does not keep the process alive, so a stalled
+    // stream with nothing else running would let the process end instead of timing out.
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), this.options.timeoutMs ?? 30000);
+    try {
+      yield* this.respondWithin(input, signal, deadline.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async *respondWithin(input: ReasonerInput, signal: AbortSignal, timeout: AbortSignal): AsyncIterable<ReasonerEvent> {
     const turns = this.history.get(input.conversationId) ?? [];
-    const timeout = AbortSignal.timeout(this.options.timeoutMs ?? 30000);
     const both = AbortSignal.any([signal, timeout]);
 
     let res: Response;

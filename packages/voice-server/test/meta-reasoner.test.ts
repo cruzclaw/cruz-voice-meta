@@ -143,6 +143,28 @@ describe('MetaReasoner', () => {
     await assert.rejects(run(r, 'x'), /timed out/);
   });
 
+  it('uses a timer that keeps the process alive, and clears it when the reply ends', async (t) => {
+    // AbortSignal.timeout does not hold the process open, so on Linux a stalled stream with nothing else
+    // running ended the whole test process instead of timing out. This pins the real timer.
+    const set = t.mock.method(globalThis, 'setTimeout');
+    const cleared = t.mock.method(globalThis, 'clearTimeout');
+    const ok = new MetaReasoner({ apiKey: KEY, timeoutMs: 4321, fetchImpl: fakeFetch(() => new Response(body(textEvents('Hi.')))) });
+    await run(ok, 'hello');
+    assert.ok(set.mock.calls.some((c) => c.arguments[1] === 4321), 'the deadline is a real timer');
+    assert.ok(cleared.mock.callCount() > 0, 'and it is cleared when the reply ends, so nothing is left running');
+  });
+
+  it('clears the timer when the turn is aborted too', async (t) => {
+    const cleared = t.mock.method(globalThis, 'clearTimeout');
+    const controller = new AbortController();
+    const stalled = new ReadableStream<Uint8Array>({ start() {} });
+    const r = new MetaReasoner({ apiKey: KEY, timeoutMs: 5000, fetchImpl: fakeFetch(() => new Response(stalled)) });
+    const pending = run(r, 'interrupted', 'a', controller.signal);
+    setTimeout(() => controller.abort(), 20);
+    assert.deepEqual(await pending, []);
+    assert.ok(cleared.mock.callCount() > 0);
+  });
+
   it('stops quietly and does not remember a turn that was aborted', async () => {
     const sent: Sent[] = [];
     const controller = new AbortController();
