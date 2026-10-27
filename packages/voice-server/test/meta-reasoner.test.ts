@@ -156,6 +156,30 @@ describe('MetaReasoner', () => {
     assert.deepEqual(sent.at(-1)!.body.input, [{ role: 'user', content: 'next' }]);
   });
 
+  it('offers only the intents the host can do, and speaks as the named employee', async () => {
+    const sent: Sent[] = [];
+    const r = new MetaReasoner({ apiKey: KEY, intents: ['send_email'], assistantName: 'Tesla', fetchImpl: fakeFetch(() => new Response(body(textEvents('Hi.'))), sent) });
+    await run(r, 'hello');
+    const [req] = sent;
+    assert.deepEqual(req!.body.tools[0].parameters.properties.intent.enum, ['send_email']);
+    assert.match(req!.body.instructions, /You are Tesla/);
+    assert.match(req!.body.instructions, /send an email/);
+    assert.doesNotMatch(req!.body.instructions, /note/i, 'it is never told it can save notes');
+  });
+
+  it('drops a task for an intent that was not offered, even if the model asks for it', async () => {
+    const r = new MetaReasoner({ apiKey: KEY, intents: ['send_email'], fetchImpl: fakeFetch(() => new Response(body(toolEvent({ intent: 'save_note', body: 'call the bank' })))) });
+    const out = await run(r, 'remind me');
+    assert.equal(out.some((e) => e.type === 'task'), false);
+    assert.match((out[0] as { text: string }).text, /could not prepare/);
+    assert.equal(toTask({ intent: 'save_note', body: 'x' }, ['send_email']), undefined);
+    assert.ok(toTask({ intent: 'send_email', to: 'a@b.co', subject: 's', body: 'b' }, ['send_email']));
+  });
+
+  it('refuses an empty list of intents', () => {
+    assert.throws(() => new MetaReasoner({ apiKey: KEY, intents: [] }), /intents/);
+  });
+
   it('requires a key', () => {
     assert.throws(() => new MetaReasoner({ apiKey: '' }), /MODEL_API_KEY/);
   });

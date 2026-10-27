@@ -13,34 +13,53 @@ export interface MetaReasonerOptions {
   timeoutMs?: number;
   /** Replace fetch, for tests. */
   fetchImpl?: typeof fetch;
+  /** The tasks the assistant may propose. Offer only what the host can really do. Both by default. */
+  intents?: ReadonlyArray<TaskIntent>;
+  /** The name the assistant speaks as, for example the employee's name. */
+  assistantName?: string;
 }
 
-const INSTRUCTIONS = [
-  'You are a voice assistant for a virtual employee. Your reply is spoken aloud.',
+export type TaskIntent = 'send_email' | 'save_note';
+const ALL_INTENTS: ReadonlyArray<TaskIntent> = ['send_email', 'save_note'];
+
+const BASE_INSTRUCTIONS = [
+  'Your reply is spoken aloud.',
   'Reply in one or two short sentences. Plain words only: no markdown, lists, emoji or URLs.',
-  'When the person asks you to do something (send an email, save a note), call propose_task.',
   'You can only propose. A person approves before anything happens, so never say an action is done or sent.',
   'You cannot cancel, undo or change a task you already proposed. If asked to, say you cannot, and tell the person to use the cancel control.',
-  'For send_email you need the recipient address, a subject and a body. If any is missing, ask for it and do not call the tool.',
-].join(' ');
-
-const TOOLS = [
-  {
-    type: 'function',
-    name: 'propose_task',
-    description: 'Propose an action for the owner to approve. Nothing happens until they approve it.',
-    parameters: {
-      type: 'object',
-      properties: {
-        intent: { type: 'string', enum: ['send_email', 'save_note'] },
-        to: { type: 'string', description: 'Recipient email address. For send_email only.' },
-        subject: { type: 'string', description: 'For send_email only.' },
-        body: { type: 'string', description: 'Email body, or the note text.' },
-      },
-      required: ['intent', 'body'],
-    },
-  },
 ];
+
+function instructionsFor(intents: ReadonlyArray<TaskIntent>, assistantName: string | undefined): string {
+  const lines = [assistantName ? `You are ${assistantName}, a virtual employee speaking with your owner.` : 'You are a voice assistant for a virtual employee.'];
+  lines.push(...BASE_INSTRUCTIONS);
+  const verbs = [intents.includes('send_email') ? 'send an email' : '', intents.includes('save_note') ? 'save a note' : ''].filter(Boolean);
+  if (verbs.length) lines.push(`When the person asks you to do something (${verbs.join(' or ')}), call propose_task.`);
+  lines.push(`You can only do this much: ${verbs.length ? verbs.join(' and ') : 'nothing yet'}. If asked for anything else, say so plainly.`);
+  if (intents.includes('send_email')) {
+    lines.push('For send_email you need the recipient address, a subject and a body. If any is missing, ask for it and do not call the tool.');
+  }
+  return lines.join(' ');
+}
+
+function toolsFor(intents: ReadonlyArray<TaskIntent>) {
+  return [
+    {
+      type: 'function',
+      name: 'propose_task',
+      description: 'Propose an action for the owner to approve. Nothing happens until they approve it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          intent: { type: 'string', enum: [...intents] },
+          to: { type: 'string', description: 'Recipient email address. For send_email only.' },
+          subject: { type: 'string', description: 'For send_email only.' },
+          body: { type: 'string', description: 'Email body, or the note text.' },
+        },
+        required: ['intent', 'body'],
+      },
+    },
+  ];
+}
 
 type Turn = { role: 'user' | 'assistant'; content: string };
 
@@ -49,9 +68,11 @@ const MAX_CONVERSATIONS = 100;
 const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,255}\.[A-Za-z]{2,}$/;
 
 /** Turns a validated tool call into a task. Wording comes from checked fields, not from the model. */
-export function toTask(args: unknown): Extract<ReasonerEvent, { type: 'task' }> | undefined {
+export function toTask(args: unknown, allowed: ReadonlyArray<TaskIntent> = ALL_INTENTS): Extract<ReasonerEvent, { type: 'task' }> | undefined {
   if (!args || typeof args !== 'object') return undefined;
   const a = args as Record<string, unknown>;
+  // The model is only offered the allowed intents, but its output is checked again here.
+  if (!allowed.includes(a.intent as TaskIntent)) return undefined;
   const text = (v: unknown, max: number): string | undefined =>
     typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined;
   const body = text(a.body, 4000);
@@ -79,9 +100,17 @@ export function toTask(args: unknown): Extract<ReasonerEvent, { type: 'task' }> 
 /** Reasoning with Meta Muse Spark over the Responses API, streamed. Proposes tasks; never performs them. */
 export class MetaReasoner implements Reasoner {
   private readonly history = new Map<string, Turn[]>();
+  private readonly intents: ReadonlyArray<TaskIntent>;
+  private readonly instructions: string;
+  private readonly tools: ReturnType<typeof toolsFor>;
 
   constructor(private readonly options: MetaReasonerOptions) {
     if (!options.apiKey) throw new Error('MODEL_API_KEY is not set');
+    const intents = options.intents ?? ALL_INTENTS;
+    if (!intents.length) throw new Error('intents must not be empty');
+    this.intents = intents;
+    this.instructions = instructionsFor(intents, options.assistantName);
+    this.tools = toolsFor(intents);
   }
 
   async *respond(input: ReasonerInput, signal: AbortSignal): AsyncIterable<ReasonerEvent> {
@@ -98,8 +127,8 @@ export class MetaReasoner implements Reasoner {
         body: JSON.stringify({
           model: this.options.model ?? META_REASONING_MODEL,
           stream: true,
-          instructions: INSTRUCTIONS,
-          tools: TOOLS,
+          instructions: this.instructions,
+          tools: this.tools,
           reasoning: { effort: this.options.effort ?? 'minimal' },
           // No max_output_tokens: reasoning tokens count against it and a low cap returns no answer.
           input: [...turns, { role: 'user', content: input.utterance }],
@@ -132,7 +161,7 @@ export class MetaReasoner implements Reasoner {
           } catch {
             args = undefined;
           }
-          const task = toTask(args);
+          const task = toTask(args, this.intents);
           if (task) yield task;
           else yield { type: 'text', text: ' I could not prepare that action. Could you give me the missing details?' };
         } else if (event === 'response.failed' || event === 'error') {
