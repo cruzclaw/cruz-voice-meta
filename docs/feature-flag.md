@@ -25,11 +25,10 @@ Why server side:
 - The Windows shell receives it from the signed-in web session, since the shell holds no credentials of its own.
 - The gateway checks the same setting on every session start.
 
-## Known limitation: turning one user's flag off does not end their open sessions
+## Revoking access while a session is open
 
-The flag is checked when a session **starts**. Turning an individual user's flag off blocks their new sessions, but a session that is already open stays open until it ends on its own (the person hangs up, the connection drops, or the maximum session length is reached). This is a remaining access-control gap, and it is not covered by the global kill switch.
+The flag is checked when a session starts, but that is not enough: turning a person's flag off must also end the session they already have open. A gateway has to re-check eligibility on a timer (the connection heartbeat is a good one) and close the session when access is withdrawn: the account is no longer active, the flag is off, or the employee is no longer theirs.
 
-The global kill switch is different: a gateway that supports it refuses new sessions and also closes open ones at its next heartbeat.
+A gateway also needs a rule for a failed check. Closing everyone on one database blip is as bad as never closing, so a sensible rule is to keep the session through a few failures in a row and close it if they continue, so an outage cannot keep revoked access open. The global kill switch is separate and is checked at the same heartbeat.
 
-Until the gap is closed, treat "turn one user's flag off" as stopping new use only. To end a specific user's open session right away, use the global kill switch or end the connection on the server. Closing the gap means re-checking the user's flag at each heartbeat, the way the kill switch is checked.
-
+The CruzClaw gateway does this: it re-checks at every heartbeat, closes with code 1008 when access is withdrawn, keeps the session through up to two failed lookups in a row, and closes with 1011 on the third. Revocation takes effect within one heartbeat interval (25 s by default), not instantly.
