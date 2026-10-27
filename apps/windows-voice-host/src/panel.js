@@ -83,7 +83,7 @@ window.panel.onState((s) => {
   orb.dataset.muted = String(muted);
   miniDot.dataset.state = s.display;
   miniDot.dataset.muted = String(muted);
-  const caption = s.muted && s.display === 'idle' ? 'Microphone muted' : CAPTION[s.display] || s.label;
+  const caption = s.muted && s.display === 'idle' ? 'Microphone muted' : s.wake && s.display === 'idle' ? 'Say “Hey Cruz”' : CAPTION[s.display] || s.label;
   $('caption').textContent = caption;
   $('mini-caption').textContent = caption;
 

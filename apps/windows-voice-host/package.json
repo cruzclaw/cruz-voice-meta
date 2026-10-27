@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@cruzclaw/voice-core": "*",
+    "@cruzclaw/wake-word": "*",
     "@cruzclaw/windows-bridge": "*",
     "ws": "^8.18.0"
   },

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron';
 import { DEFAULT_SHORTCUT, EndpointDetector, expandedBounds, miniBounds, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
+import { createSherpaWakeDetector, type WakeDetector } from '@cruzclaw/wake-word';
 import { VoiceClient } from './client.js';
 import { HostController, type AudioDevice } from './controller.js';
 
@@ -21,6 +22,10 @@ const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
 /** The panel is 10% narrower than the 380 px the layout started from. */
 const PANEL_WIDTH = Math.round(380 * 0.9);
 const PANEL_HEIGHT = 330;
+/** Set VOICE_WAKE=1 to wake the assistant by saying Hey, Hi, Hello or Okay Cruz. The microphone then stays open on this machine while idle. Off by default. */
+const WAKE = process.env.VOICE_WAKE === '1';
+const WAKE_MODEL_DIR =
+  process.env.VOICE_WAKE_MODEL_DIR ?? path.join(__dirname, '..', '..', '..', 'packages', 'wake-word', 'models', 'sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01');
 /** Listening ends by itself after this much quiet. Set VOICE_AUTO_END=0 to end it with a second press only. */
 const AUTO_END = process.env.VOICE_AUTO_END !== '0';
 /** After each answer it listens for a reply by itself. Set VOICE_FOLLOW_UP=0 to need a press every time. */
@@ -67,6 +72,7 @@ function dot(display: DisplayState) {
 
 let audioWindow: BrowserWindow | undefined;
 let panel: BrowserWindow | undefined;
+let wakeDetector: WakeDetector | undefined;
 /** The panel is shrunk to the bar above the taskbar. */
 let mini = false;
 let diag = '';
@@ -95,6 +101,7 @@ const audio: AudioDevice = {
   },
   isPlaying: () => speakerBusy,
   chime: (kind) => audioWindow?.webContents.send('chime', kind),
+  listenForWake: (on) => audioWindow?.webContents.send('wake-mic', on),
 };
 
 /** One id for this launch, so the assistant keeps its memory of the conversation across greetings. */
@@ -109,6 +116,10 @@ const controller = new HostController(
   audio,
   {
     followUp: FOLLOW_UP,
+    onWake: (phrase) => {
+      log(`wake phrase heard: ${phrase}`);
+      if (panel && !panel.isVisible()) panel.showInactive();
+    },
     ...(AUTO_END ? { endpoint: new EndpointDetector({ endSilenceMs: END_SILENCE_MS }) } : {}),
     onChange: (state, display) => {
     tray?.setImage(dot(display));
@@ -139,6 +150,7 @@ function pushPanel(state: PanelState, display: DisplayState): void {
     shortcut: SHORTCUT,
     autoEnd: AUTO_END,
     muted: state.micMuted,
+    wake: controller.wakeListening,
     inCall: controller.inCall,
     mini,
     debug: DUMP,
@@ -400,12 +412,23 @@ if (!app.requestSingleInstanceLock()) {
     // In debug mode, play a test tone once the audio window is ready.
     if (DUMP) audioWindow.webContents.once('did-finish-load', () => setTimeout(() => audioWindow?.webContents.send('beep'), 1000));
 
+    if (WAKE) {
+      createSherpaWakeDetector({ modelDir: WAKE_MODEL_DIR, sampleRate: 24000 }).then(
+        (detector) => {
+          wakeDetector = detector;
+          controller.enableWake({ feed: (pcm) => detector.feed(pcm), reset: () => detector.reset() });
+          log('wake phrase on: say Hey, Hi, Hello or Okay Cruz. Audio is checked on this machine only.');
+        },
+        (e: unknown) => log(`wake phrase is off: ${e instanceof Error ? e.message : 'could not start'}`),
+      );
+    }
     void connectOnce();
   });
   app.on('before-quit', () => {
     quitting = true;
     controller.dispose();
     clearTimeout(reconnectTimer);
+    wakeDetector?.dispose();
     client?.close();
     globalShortcut.unregisterAll();
   });

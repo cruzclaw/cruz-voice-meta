@@ -24,6 +24,14 @@ export interface AudioDevice {
   isPlaying(): boolean;
   /** A short tone, not speech. Capture started right after a chime waits for it to finish. */
   chime(kind: ChimeKind): void;
+  /** Keeps the microphone open for the wake phrase, or lets it close. The audio stays on this machine. */
+  listenForWake(on: boolean): void;
+}
+
+/** Hears the wake phrase in a stream of microphone audio. Matches WakeDetector in @cruzclaw/wake-word. */
+export interface WakeSource {
+  feed(pcm: Uint8Array): string | undefined;
+  reset(): void;
 }
 
 /** The part of VoiceClient the controller drives. */
@@ -38,6 +46,10 @@ export interface ControllerOptions {
   onChange?: (state: PanelState, display: DisplayState) => void;
   /** When given, listening ends by itself once the person stops talking. */
   endpoint?: EndpointDetector;
+  /** When given, the microphone listens for the wake phrase while nothing else is going on. */
+  wake?: WakeSource;
+  /** Called with the phrase that was heard, just before the call starts. */
+  onWake?: (phrase: string) => void;
   /** If nothing comes back after the person stops talking, stop showing "thinking". */
   noResponseMs?: number;
   /** After an answer has been spoken, listen for a reply without another press. */
@@ -53,6 +65,10 @@ const NO_RESPONSE_MS = 15000;
 const IDLE_GREET_MS = 15 * 60 * 1000;
 /** Stay under the server's 60 s per-utterance cap. */
 const MAX_UTTERANCE_MS = 55000;
+/** After the phrase is heard, ignore it for this long, so one "Hey Cruz" cannot start two calls. */
+const WAKE_COOLDOWN_MS = 1500;
+/** When the microphone was already open for the wake phrase, the listening chime is on it for this long, so skip that audio. */
+const CHIME_GUARD_MS = 250;
 
 /** Messages about a reply that was cut off. They can still arrive after the interrupt was sent. */
 const REPLY_MESSAGES: ReadonlyArray<ServerMessage['type']> = ['assistant.text.delta', 'assistant.text.done', 'tts.start', 'tts.end', 'tts.cancelled'];
@@ -69,6 +85,11 @@ export class HostController {
   private readonly idleGreetMs: number;
   private readonly now: () => number;
   private readonly followUp: boolean;
+  private wake: WakeSource | undefined;
+  private readonly onWake: ((phrase: string) => void) | undefined;
+  private wakeMicOn = false;
+  private wakeCooldownUntil = 0;
+  private guardUntil = 0;
   private settle: ReturnType<typeof setTimeout> | undefined;
   private cap: ReturnType<typeof setTimeout> | undefined;
   private waiting: ReturnType<typeof setTimeout> | undefined;
@@ -101,10 +122,20 @@ export class HostController {
     this.idleGreetMs = options.idleGreetMs ?? IDLE_GREET_MS;
     this.now = options.now ?? Date.now;
     this.followUp = options.followUp ?? true;
+    this.wake = options.wake;
+    this.onWake = options.onWake;
   }
 
   get display(): DisplayState {
     return displayState(this.state);
+  }
+
+  /**
+   * True while the microphone should be open only to hear the wake phrase: connected, nothing going
+   * on, and not muted. Muting closes the microphone, so nothing is heard at all.
+   */
+  get wakeListening(): boolean {
+    return !!this.wake && this.state.connected && !this.state.micMuted && this.state.phase === 'idle' && !this.inCall;
   }
 
   /**
@@ -170,12 +201,21 @@ export class HostController {
 
   /** Microphone frames only travel while the person is actually being listened to. */
   onMic(pcm: Uint8Array): void {
-    if (this.state.phase === 'listening') this.link.sendMic(pcm);
+    if (this.state.phase === 'listening') {
+      if (this.now() >= this.guardUntil) this.link.sendMic(pcm);
+      return;
+    }
+    if (!this.wake || !this.wakeListening || this.now() < this.wakeCooldownUntil) return;
+    const phrase = this.wake.feed(pcm);
+    if (!phrase) return;
+    this.wakeCooldownUntil = this.now() + WAKE_COOLDOWN_MS;
+    this.onWake?.(phrase);
+    this.press();
   }
 
   /** One microphone level per frame while listening. Ends or drops the turn when the person goes quiet. */
   onLevel(level: number): void {
-    if (this.state.phase !== 'listening' || !this.endpoint) return;
+    if (this.state.phase !== 'listening' || !this.endpoint || this.now() < this.guardUntil) return;
     const event = this.endpoint.feed(level);
     if (event === 'speech_ended') this.command('summon');
     else if (event === 'no_speech') this.cancelListening();
@@ -247,6 +287,12 @@ export class HostController {
     this.emit();
   }
 
+  /** Starts listening for the wake phrase. Called once a detector has loaded, so the microphone is never opened for nothing. */
+  enableWake(source: WakeSource): void {
+    this.wake = source;
+    this.emit();
+  }
+
   /** Stops timers and devices. Call when the app quits. */
   dispose(): void {
     this.stopAll();
@@ -309,6 +355,8 @@ export class HostController {
     switch (effect.type) {
       case 'capture':
         if (effect.on) {
+          // The microphone may already be open for the wake phrase, with nothing to wait for the chime.
+          this.guardUntil = this.wakeMicOn ? this.now() + CHIME_GUARD_MS : 0;
           this.endpoint?.reset();
           this.quietListen = this.nextListenQuiet;
           this.nextListenQuiet = false;
@@ -370,11 +418,22 @@ export class HostController {
 
   /** Tells the shell something changed that is not part of the panel state, such as being in a call. */
   private emit(): void {
+    this.syncWakeMic();
     this.onChange(this.state, this.display);
+  }
+
+  /** Opens or closes the microphone for the wake phrase when the situation changes. */
+  private syncWakeMic(): void {
+    const want = this.wakeListening;
+    if (want === this.wakeMicOn) return;
+    this.wakeMicOn = want;
+    if (want) this.wake?.reset(); // nothing heard earlier counts
+    this.audio.listenForWake(want);
   }
 
   private dispatch(event: PanelEvent): void {
     this.state = reducePanel(this.state, event);
+    this.syncWakeMic();
     this.onChange(this.state, this.display);
   }
 }

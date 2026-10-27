@@ -37,9 +37,12 @@ let node;
 let starting = false;
 // Set by the main process. If listening was cancelled while the microphone was still opening, do not open it.
 let wanted = false;
+// The microphone is open for either reason: listening to the person, or waiting for the wake phrase.
+let forListening = false;
+let forWake = false;
 
 async function startCapture() {
-  wanted = true;
+  wanted = forListening || forWake;
   if (stream || starting) return;
   starting = true;
   try {
@@ -54,7 +57,7 @@ async function startCapture() {
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
     if (!wanted) {
-      stopCapture();
+      releaseMic();
       return;
     }
     source = context.createMediaStreamSource(stream);
@@ -70,19 +73,25 @@ async function startCapture() {
     source.connect(node);
   } catch (e) {
     window.hostAudio.reportError(e && e.message ? e.message : e);
-    stopCapture();
+    wanted = false;
+    releaseMic();
   } finally {
     starting = false;
   }
 }
 
-function stopCapture() {
-  wanted = false;
+function releaseMic() {
   if (node) node.port.onmessage = null;
   if (source) source.disconnect();
   if (node) node.disconnect();
   if (stream) stream.getTracks().forEach((track) => track.stop());
   stream = source = node = undefined;
+}
+
+// Called when one reason to hold the microphone ends. It closes only if no reason is left.
+function stopCapture() {
+  wanted = forListening || forWake;
+  if (!wanted) releaseMic();
 }
 
 // Everything the assistant says goes through this analyser, so the panel can move with its voice.
@@ -183,6 +192,15 @@ function beep() {
 
 window.hostAudio.onBeep(beep);
 window.hostAudio.onChime(chime);
-window.hostAudio.onCapture((on) => (on ? startCapture() : stopCapture()));
+window.hostAudio.onCapture((on) => {
+  forListening = on;
+  if (on) startCapture();
+  else stopCapture();
+});
+window.hostAudio.onWake((on) => {
+  forWake = on;
+  if (on) startCapture();
+  else stopCapture();
+});
 window.hostAudio.onPlay(play);
 window.hostAudio.onStopPlayback(stopPlayback);

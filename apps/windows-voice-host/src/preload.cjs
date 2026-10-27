@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('hostAudio', {
   onCapture: (callback) => ipcRenderer.on('capture', (_event, on) => callback(Boolean(on))),
   onPlay: (callback) => ipcRenderer.on('play', (_event, pcm) => callback(pcm)),
   onChime: (callback) => ipcRenderer.on('chime', (_event, kind) => callback(String(kind))),
+  onWake: (callback) => ipcRenderer.on('wake-mic', (_event, on) => callback(Boolean(on))),
   onBeep: (callback) => ipcRenderer.on('beep', () => callback()),
   onStopPlayback: (callback) => ipcRenderer.on('stop-playback', () => callback()),
   sendMic: (buffer) => ipcRenderer.send('mic', buffer),

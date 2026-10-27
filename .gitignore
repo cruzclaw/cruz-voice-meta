@@ -12,3 +12,6 @@ coverage/
 *.wav
 *.onnx
 .DS_Store
+
+# Downloaded models
+packages/wake-word/models/

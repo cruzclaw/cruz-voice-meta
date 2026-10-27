@@ -9,7 +9,7 @@ await build({
   platform: 'node',
   format: 'cjs',
   target: 'node22',
-  external: ['electron'],
+  external: ['electron', 'sherpa-onnx-node'],
   logLevel: 'info',
 });
 for (const file of ['preload.cjs', 'audio.html', 'audio-renderer.js', 'audio-worklet.js', 'panel-preload.cjs', 'panel.html', 'panel.css', 'panel.js']) {

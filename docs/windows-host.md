@@ -27,6 +27,21 @@ Electron's binary is not fetched by npm 11 (install scripts are skipped). If `np
 
 The controller and client are tested against the real demo server with a fake microphone and speaker. The audio window is not covered by automated tests and needs a person at a microphone.
 
+## Wake phrase (optional, off by default)
+
+Say "Hey Cruz", "Hi Cruz", "Hello Cruz" or "Okay Cruz" and the assistant starts a call, as if you had pressed Call.
+
+1. Once: `npm run fetch-model -w @cruzclaw/wake-word` downloads the keyword model (about 17 MB, Apache-2.0, checked against a pinned checksum) into `packages/wake-word/models`, which is not committed.
+2. Start the host with `VOICE_WAKE=1`. The log says "wake phrase on" when the detector has loaded, or why it did not.
+
+How it works and what it costs:
+- **Local only.** A small keyword spotter (sherpa-onnx) runs on this machine. Nothing is sent anywhere until the phrase has been heard and the call has started.
+- **The microphone stays open while idle**, so Windows shows its microphone indicator all the time. It closes while muted, while disconnected, and during a call (when it is used for the call instead). The panel says "Say Hey Cruz" while it is waiting.
+- **A greeting is required.** "Cruz" alone sounds the same as "cruise" and "crews" and cannot be told apart from them. With a greeting, test speech woke it every time and ordinary speech, other assistants ("Hey Siri") and cruise or crews without a greeting never did. A bare "Cruz" can be enabled in `@cruzclaw/wake-word` (`bareThreshold`) but is not recommended.
+- **Say the phrase, wait for the chime.** The first moments after the phrase are the chime, so start your request after it. On the first call of a session the greeting plays first.
+- Measured on speech made by Kokoro in five voices, not on real voices or noise. Whether it works for your voice and room is what a live test shows. `WAKE_LIVE=1 npx tsx --test packages/wake-word/test/sherpa.live.test.ts` repeats the speech test.
+- Kokoro (the speech engine) and the keyword spotter each load their own `onnxruntime.dll` and cannot run in the same process. In this app they do not: speech runs in the server.
+
 ## Known limits
 
 - Listening ends by itself after about 0.9 s of quiet following speech (`VOICE_END_SILENCE_MS` sets it, 300 to 3000; `VOICE_AUTO_END=0` turns it off, leaving the second press). It judges from the microphone level only, so a sudden loud noise can look like speech and a long pause to think can end a turn. The second press and the 55 s cap are the backstops. Listening with no speech for 8 s is dropped.

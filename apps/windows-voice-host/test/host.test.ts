@@ -6,7 +6,7 @@ import type { Synthesizer } from '../../demo-server/src/ports.js';
 import { RuleReasoner, ScriptedTranscriber } from '../../demo-server/src/mock-providers.js';
 import { createDemoServer, type DemoServer } from '../../demo-server/src/server.js';
 import { VoiceClient } from '../src/client.js';
-import { HostController, type AudioDevice, type ChimeKind, type Link } from '../src/controller.js';
+import { HostController, type AudioDevice, type ChimeKind, type Link, type WakeSource } from '../src/controller.js';
 
 /** A speaker that keeps sounding for a while after the last chunk, like the real one. */
 class FakeAudio implements AudioDevice {
@@ -30,6 +30,9 @@ class FakeAudio implements AudioDevice {
   stopPlayback() { this.calls.push('stopPlayback'); this.busy = false; clearTimeout(this.timer); }
   isPlaying() { return this.busy; }
   chime(kind: ChimeKind) { this.calls.push(`chime:${kind}`); }
+  /** Every change of the wake microphone, in order. Kept apart from calls so older tests are unaffected. */
+  wakeCalls: boolean[] = [];
+  listenForWake(on: boolean) { this.wakeCalls.push(on); }
 }
 
 const until = async (pred: () => boolean, ms = 5000) => {
@@ -610,6 +613,127 @@ describe('HostController timing and interrupts', () => {
     assert.equal(t.c.display, 'idle');
     assert.equal(t.c.inCall, true);
     t.c.dispose();
+  });
+
+  describe('wake phrase', () => {
+    /** Hears the phrase whenever it is given a chunk that is exactly two bytes long. */
+    const fakeWake = () => {
+      const w = { fed: 0, resets: 0, feed(pcm: Uint8Array) { w.fed++; return pcm.byteLength === 2 ? 'HEY CRUZ' : undefined; }, reset() { w.resets++; } };
+      return w satisfies WakeSource & { fed: number; resets: number };
+    };
+    const PHRASE = new Uint8Array(2);
+    const woken = (extra: ConstructorParameters<typeof HostController>[2] = {}) => {
+      const wake = fakeWake();
+      const phrases: string[] = [];
+      let now = 1_000_000;
+      const t = scripted({ wake, onWake: (p) => phrases.push(p), now: () => now, ...extra });
+      return { ...t, wake, phrases, advance: (ms: number) => { now += ms; } };
+    };
+
+    it('keeps the microphone open for the phrase only while connected, idle and not muted', () => {
+      const t = woken();
+      assert.deepEqual(t.audio.wakeCalls, [true], 'open as soon as it is connected and idle');
+      t.c.toggleMute();
+      assert.deepEqual(t.audio.wakeCalls, [true, false], 'muting closes the microphone');
+      t.c.toggleMute();
+      assert.deepEqual(t.audio.wakeCalls, [true, false, true]);
+      t.c.setConnected(false);
+      assert.equal(t.audio.wakeCalls.at(-1), false, 'closed when disconnected');
+      t.c.dispose();
+    });
+
+    it('closes the microphone for the phrase during a call and reopens it when the call ends', () => {
+      const t = woken();
+      t.active();
+      t.c.press(); // listening
+      assert.equal(t.audio.wakeCalls.at(-1), false);
+      t.c.hangUp();
+      assert.equal(t.audio.wakeCalls.at(-1), true, 'back to listening for the phrase after hanging up');
+      t.c.dispose();
+    });
+
+    it('starts a call when the phrase is heard, and tells the shell which phrase', async () => {
+      const t = woken();
+      t.c.onMic(PHRASE);
+      assert.deepEqual(t.phrases, ['HEY CRUZ']);
+      await Promise.resolve();
+      assert.deepEqual(t.starts, [false], 'a first call opens the session, so the greeting plays');
+      assert.equal(t.audio.wakeCalls.at(-1), false);
+      t.c.dispose();
+    });
+
+    it('with a session already open, the phrase goes straight to the chime and listening', () => {
+      const t = woken();
+      t.active();
+      t.c.onMic(PHRASE);
+      assert.equal(t.c.display, 'listening');
+      assert.deepEqual(t.starts, []);
+      assert.ok(t.audio.calls.includes('chime:listening'));
+      t.c.dispose();
+    });
+
+    it('does not hear the phrase while listening, thinking, speaking, muted or hung up', () => {
+      const t = woken();
+      t.active();
+      t.c.press(); // listening: audio goes to the server, not to the detector
+      const fed = t.wake.fed;
+      t.c.onMic(PHRASE);
+      assert.equal(t.wake.fed, fed);
+      t.c.toggleMute();
+      t.c.onMic(PHRASE);
+      assert.equal(t.wake.fed, fed, 'muted');
+      assert.deepEqual(t.phrases, []);
+      t.c.dispose();
+    });
+
+    it('one phrase starts one call: a repeat within a moment is ignored', () => {
+      const t = woken();
+      t.active();
+      t.c.onMic(PHRASE); // starts listening
+      t.c.hangUp(); // back to waiting for the phrase straight away
+      t.c.onMic(PHRASE);
+      assert.deepEqual(t.phrases, ['HEY CRUZ'], 'still inside the cooldown');
+      t.advance(2000);
+      t.c.onMic(PHRASE);
+      assert.deepEqual(t.phrases, ['HEY CRUZ', 'HEY CRUZ']);
+      t.c.dispose();
+    });
+
+    it('forgets earlier audio each time it starts listening again, so a half-heard phrase does not carry over', () => {
+      const t = woken();
+      t.active();
+      const before = t.wake.resets;
+      t.c.press();
+      t.c.hangUp();
+      assert.ok(t.wake.resets > before);
+      t.c.dispose();
+    });
+
+    it('skips the first moments of listening when the microphone was already open, so the chime is not heard as speech', () => {
+      const sent: number[] = [];
+      let now = 5_000_000;
+      const c = new HostController(
+        { send: () => undefined, sendMic: (p) => void sent.push(p.byteLength), startSession: async () => undefined },
+        new FakeAudio(),
+        { wake: fakeWake(), now: () => now },
+      );
+      c.setConnected(true);
+      c.onServer({ v: 1, seq: 1, type: 'session.ready', sessionId: 's', audio: { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 } });
+      c.press();
+      c.onMic(new Uint8Array(960)); // the chime is still sounding
+      now += 300;
+      c.onMic(new Uint8Array(960));
+      c.dispose();
+      assert.deepEqual(sent, [960], 'only the audio after the chime was sent');
+    });
+
+    it('does nothing about the phrase without a wake source', () => {
+      const t = scripted();
+      assert.deepEqual(t.audio.wakeCalls, []);
+      t.c.onMic(PHRASE);
+      assert.equal(t.c.display, 'idle');
+      t.c.dispose();
+    });
   });
 
   it('a press with no session starts one, and a normal press afterwards does not', async () => {
