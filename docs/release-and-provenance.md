@@ -3,9 +3,9 @@
 ## Release flow
 
 1. A reviewed pull request merges to `main` and CI passes.
-2. A maintainer bumps the `@cruzclaw/voice-core` version and pushes a matching tag, for example `v0.1.0`.
-3. The `release` workflow rebuilds from the tag, runs typecheck and tests, and refuses to publish if the tag does not match the package version.
-4. It attaches three files to the GitHub release: the package tarball, `SHA256SUMS` and a CycloneDX SBOM. The tarball carries a build provenance attestation.
+2. A maintainer sets the same version in `voice-core`, `voice-server` and `tts-kokoro` and pushes a matching tag, for example `v0.1.0`.
+3. The `release` workflow rebuilds from the tag, runs typecheck and tests, and refuses to publish if the tag does not match every package version.
+4. It attaches five files to the GitHub release: the three package tarballs, `SHA256SUMS` and a CycloneDX SBOM. The tarballs carry a build provenance attestation.
 
 ## How a host consumes a release
 
@@ -27,4 +27,4 @@ Re-pin the previous release in the host. Published releases are not edited or re
 - Every file here is authored for this repository or has an explicit, recorded origin and license.
 - Nothing is copied from a private repository. A change that moves code from elsewhere needs a provenance note in its pull request and a review before merge.
 - CI scans full history for secrets and audits dependencies and licenses on every pull request.
-- The license is not yet chosen. Apache 2.0 is proposed and needs owner and legal approval before a LICENSE file is added and before the first release is tagged.
+- The license is Apache-2.0. The text is in `LICENSE` at the repository root, and each package carries an identical copy so it ships inside every published tarball. A test fails if a copy differs from the root file.
