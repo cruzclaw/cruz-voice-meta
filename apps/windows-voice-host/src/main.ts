@@ -18,7 +18,7 @@ const TOKEN = process.env.VOICE_TOKEN ?? '';
 const SHORTCUT = process.env.VOICE_SHORTCUT ?? DEFAULT_SHORTCUT;
 /** Set VOICE_DEBUG_DUMP=1 to save the last thing the microphone heard as a WAV file in the temp folder. */
 const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
-const PANEL_HEIGHT = 250;
+const PANEL_HEIGHT = 330;
 /** Listening ends by itself after this much quiet. Set VOICE_AUTO_END=0 to end it with a second press only. */
 const AUTO_END = process.env.VOICE_AUTO_END !== '0';
 /** After each answer it listens for a reply by itself. Set VOICE_FOLLOW_UP=0 to need a press every time. */
@@ -134,6 +134,8 @@ function pushPanel(state: PanelState, display: DisplayState): void {
     error: state.lastError && display !== 'listening' ? state.lastError.message : undefined,
     shortcut: SHORTCUT,
     autoEnd: AUTO_END,
+    muted: state.micMuted,
+    debug: DUMP,
   });
 }
 
@@ -279,7 +281,7 @@ function createPanel(): BrowserWindow {
 
 function summon(): void {
   if (panel && !panel.isVisible()) panel.showInactive();
-  controller.command('summon');
+  controller.press();
 }
 
 function trayMenu(): Menu {
@@ -333,7 +335,16 @@ if (!app.requestSingleInstanceLock()) {
       setDiag(text);
     });
     ipcMain.on('panel-talk', (event) => {
-      if (event.sender === panel?.webContents) controller.command('summon');
+      if (event.sender === panel?.webContents) controller.press();
+    });
+    ipcMain.on('panel-mute', (event) => {
+      if (event.sender === panel?.webContents) controller.toggleMute();
+    });
+    ipcMain.on('out-level', (event, level: unknown) => {
+      // How loud the assistant's voice is right now, measured at the speaker, to move the orb with it.
+      if (event.sender === audioWindow?.webContents && typeof level === 'number' && controller.state.phase === 'speaking') {
+        panel?.webContents.send('panel-level', level);
+      }
     });
     ipcMain.on('panel-hide', (event) => {
       if (event.sender === panel?.webContents) panel.hide();

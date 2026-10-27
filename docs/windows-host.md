@@ -1,6 +1,6 @@
 # Windows voice host
 
-`apps/windows-voice-host` is the Windows app that talks to a voice server. There is no panel window yet: the tray icon shows the state and the terminal logs what was heard and said.
+`apps/windows-voice-host` is the Windows app that talks to a voice server. A small panel (about 380 by 330) shows what it is doing: an orb that changes colour with the state and moves with the loudness of whoever is talking (you while listening, the assistant while speaking), the conversation text scrolling below it, and Mute and Talk buttons. The tray icon shows the state too, and the terminal logs what was heard and said.
 
 ## Run it locally
 
@@ -32,4 +32,4 @@ The controller and client are tested against the real demo server with a fake mi
 - Listening ends by itself after about 0.9 s of quiet following speech (`VOICE_END_SILENCE_MS` sets it, 300 to 3000; `VOICE_AUTO_END=0` turns it off, leaving the second press). It judges from the microphone level only, so a sudden loud noise can look like speech and a long pause to think can end a turn. The second press and the 55 s cap are the backstops. Listening with no speech for 8 s is dropped.
 - Microphone audio goes to the server only between the first press and the end of listening.
 - Approvals still go through the demo server's HTTP endpoint, not the host.
-- No panel window, so there is no text on screen.
+- Mute stops automatic listening (follow-ups, the end of the greeting). A deliberate press of Talk, the shortcut or the tray turns the microphone back on. Muting while listening drops what was said so far without an answer.

@@ -169,6 +169,35 @@ export class HostController {
     else if (event === 'no_speech') this.cancelListening();
   }
 
+  /**
+   * The person pressed the shortcut, the tray or the Talk button. That is a deliberate act, so it
+   * wins over mute: it turns the microphone back on and listens. Automatic listening (a follow-up,
+   * the end of the greeting) never overrides mute.
+   */
+  press(): void {
+    if (this.state.micMuted) this.dispatch({ kind: 'ui', action: { type: 'toggle_mute' } });
+    this.command('summon');
+  }
+
+  /** Mutes or unmutes the microphone. Muting while listening drops what was said so far without an answer. */
+  toggleMute(): void {
+    const wasListening = this.state.phase === 'listening';
+    this.dispatch({ kind: 'ui', action: { type: 'toggle_mute' } });
+    if (!this.state.micMuted) return;
+    this.listenWhenDrained = false;
+    this.followUpDue = false;
+    this.nextListenQuiet = false;
+    if (!wasListening) return;
+    clearTimeout(this.cap);
+    this.audio.stopCapture();
+    // The server has been buffering this utterance. Ending it and cutting in straight away
+    // clears the buffer and stops the server from answering it.
+    this.sendInputEnd();
+    this.expectedUtterance = 'interrupted';
+    this.discardReply = true;
+    this.link.send({ v: 1, type: 'interrupt', reason: 'user' });
+  }
+
   command(command: Command): void {
     if (command === 'summon' && this.needsSession()) {
       this.lastActivity = this.now();

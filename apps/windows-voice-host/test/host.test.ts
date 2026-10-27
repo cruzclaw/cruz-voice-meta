@@ -446,6 +446,71 @@ describe('HostController timing and interrupts', () => {
     for (const t of [normal, interrupted, failed, off]) t.c.dispose();
   });
 
+  it('muting stops automatic listening, but a deliberate press turns the microphone back on', () => {
+    const t = scripted();
+    t.active();
+    t.c.toggleMute();
+    assert.equal(t.c.state.micMuted, true);
+    t.c.command('summon'); // what an automatic listen does: it respects mute
+    assert.equal(t.audio.calls.includes('start'), false);
+    t.c.press(); // the person pressed Talk
+    assert.equal(t.c.state.micMuted, false);
+    assert.equal(t.c.display, 'listening');
+    t.c.dispose();
+  });
+
+  it('muting while listening drops the turn: the server is told to discard it and never answers it', () => {
+    const t = scripted({ endpoint: new EndpointDetector() });
+    t.active();
+    t.c.command('summon');
+    assert.equal(t.c.display, 'listening');
+    t.c.toggleMute();
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.c.state.micMuted, true);
+    assert.deepEqual(t.sent.map((m) => m.type), ['input.end', 'interrupt']);
+    assert.ok(t.audio.calls.includes('stop'));
+    // Whatever the server still sends for that utterance is ignored.
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'half a sentence' });
+    t.server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'Answer.' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.c.state.reply, '');
+    t.c.dispose();
+  });
+
+  it('no follow-up listening while muted, and unmuting does not start listening by itself', () => {
+    const t = scripted();
+    t.active();
+    t.c.command('summon');
+    t.c.command('summon');
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'hello' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    t.c.toggleMute(); // muted while the answer plays
+    t.server({ type: 'tts.end', ttsId: 't' });
+    assert.equal(t.audio.calls.filter((x) => x === 'start').length, 1, 'only the original listen');
+    t.c.toggleMute();
+    assert.equal(t.c.state.micMuted, false);
+    assert.notEqual(t.c.display, 'listening');
+    t.c.dispose();
+  });
+
+  it('muting then unmuting before the answer finishes playing does not open the microphone by surprise', () => {
+    const t = scripted();
+    t.active();
+    t.c.command('summon');
+    t.c.command('summon');
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'hello' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    t.c.onSpeech(new Uint8Array(960)); // the speaker is busy
+    t.server({ type: 'tts.end', ttsId: 't' }); // a follow-up is now due once it drains
+    t.c.toggleMute();
+    t.c.toggleMute();
+    t.c.onPlaybackDrained();
+    assert.equal(t.audio.calls.filter((x) => x === 'start').length, 1, 'only the original listen');
+    assert.notEqual(t.c.display, 'listening');
+    t.c.dispose();
+  });
+
   it('a press with no session starts one, and a normal press afterwards does not', async () => {
     const t = scripted();
     t.c.command('summon');

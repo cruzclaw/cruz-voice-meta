@@ -8,21 +8,45 @@
   </head>
   <body>
     <header>
-      <span class="title">CruzClaw voice</span>
-      <button id="close" class="icon" title="Hide (the tray icon stays)" aria-label="Hide">&times;</button>
+      <span class="title">Voice</span>
+      <button id="close" class="close" title="Hide (the tray icon stays)" aria-label="Hide panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
     </header>
+
     <main>
-      <div class="state"><span id="dot" class="dot"></span><span id="label">Starting</span></div>
-      <div class="meter" aria-label="Microphone level"><div id="level"></div></div>
-      <p class="row"><span class="tag">You</span><span id="said" class="text muted">&nbsp;</span></p>
-      <p class="row"><span class="tag">Reply</span><span id="reply" class="text muted">&nbsp;</span></p>
+      <div id="orb" class="orb" data-state="disconnected" aria-hidden="true">
+        <span class="glow"></span>
+        <span class="ring ring-a"></span>
+        <span class="ring ring-b"></span>
+        <span class="core"><span class="swirl"></span><span class="shine"></span></span>
+      </div>
+      <p id="caption" class="caption" role="status" aria-live="polite">Starting</p>
+
+      <section id="scroll" class="scroll" tabindex="0" aria-label="Conversation">
+        <div id="log" class="log"></div>
+      </section>
       <p id="note" class="note" hidden></p>
     </main>
+
     <footer>
-      <button id="talk">Talk</button>
-      <span id="hint" class="hint"></span>
+      <button id="mute" class="round" aria-pressed="false" aria-label="Mute microphone" title="Mute microphone">
+        <svg class="icon-mic" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+          <path class="slash" d="M4 4l16 16" />
+        </svg>
+      </button>
+      <button id="talk" class="talk" aria-label="Talk">
+        <span class="talk-rings" aria-hidden="true"></span>
+        <svg class="icon-mic" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+        </svg>
+        <svg class="icon-stop" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" /></svg>
+      </button>
     </footer>
-    <p id="diag" class="diag"></p>
+    <p id="diag" class="diag" hidden></p>
     <script src="panel.js"></script>
   </body>
 </html>

@@ -6,5 +6,6 @@ contextBridge.exposeInMainWorld('panel', {
   onLevel: (callback) => ipcRenderer.on('panel-level', (_event, level) => callback(level)),
   onDiag: (callback) => ipcRenderer.on('panel-diag', (_event, text) => callback(text)),
   talk: () => ipcRenderer.send('panel-talk'),
+  mute: () => ipcRenderer.send('panel-mute'),
   hide: () => ipcRenderer.send('panel-hide'),
 });

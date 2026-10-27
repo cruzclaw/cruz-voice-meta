@@ -85,6 +85,27 @@ function stopCapture() {
   stream = source = node = undefined;
 }
 
+// Everything the assistant says goes through this analyser, so the panel can move with its voice.
+const speaker = context.createGain();
+const analyser = context.createAnalyser();
+analyser.fftSize = 512;
+speaker.connect(analyser);
+analyser.connect(context.destination);
+const samplesBuffer = new Float32Array(analyser.fftSize);
+let wasSounding = false;
+setInterval(() => {
+  if (playing.size === 0) {
+    if (wasSounding) window.hostAudio.sendOutLevel(0);
+    wasSounding = false;
+    return;
+  }
+  analyser.getFloatTimeDomainData(samplesBuffer);
+  let sum = 0;
+  for (let i = 0; i < samplesBuffer.length; i++) sum += samplesBuffer[i] * samplesBuffer[i];
+  wasSounding = true;
+  window.hostAudio.sendOutLevel(Math.sqrt(sum / samplesBuffer.length));
+}, 50);
+
 window.hostAudio.info(`audio ready: ${context.state} at ${context.sampleRate} Hz`);
 let playAt = 0;
 const playing = new Set();
@@ -107,7 +128,7 @@ function play(pcm) {
   }
   const node = context.createBufferSource();
   node.buffer = buffer;
-  node.connect(context.destination);
+  node.connect(speaker);
   // Chain chunks back to back, with a small lead so the first one is not clipped.
   playAt = Math.max(playAt, context.currentTime + 0.05);
   node.start(playAt);
