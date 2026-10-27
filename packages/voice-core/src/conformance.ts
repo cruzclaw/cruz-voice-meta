@@ -19,6 +19,9 @@ export interface ConformanceHarness {
   sideEffectCount(tenantKey: string, taskId: string): number;
 }
 
+/** A complete email, as a real host needs: recipient, subject and body. */
+const EMAIL = { to: 'team@example.com', subject: 'Weekly update', body: 'Hi team, here is the weekly update.' };
+
 const request = (key: string, over: Partial<TaskRequest> = {}): TaskRequest => ({
   idempotencyKey: key,
   conversationId: 'conv-1',
@@ -65,7 +68,7 @@ export function runConformanceSuite(name: string, makeHarness: () => Conformance
         idempotencyKey: 'ap1',
         taskId: task.taskId,
         kind: 'email.send',
-        payload: { to: 'team@example.com' },
+        payload: EMAIL,
       });
       await rejectsWith(b.getTaskStatus(task.taskId), 'NOT_FOUND');
       await rejectsWith(b.cancelTask(task.taskId), 'NOT_FOUND');
@@ -107,7 +110,7 @@ export function runConformanceSuite(name: string, makeHarness: () => Conformance
       const h = makeHarness();
       const host = h.createHost('a');
       const task = await host.proposeTask(request('k1'));
-      const payload = { to: 'team@example.com', body: 'Weekly update' };
+      const payload = EMAIL;
       const first = await host.requestApproval({ idempotencyKey: 'ap1', taskId: task.taskId, kind: 'email.send', payload });
       const again = await host.requestApproval({ idempotencyKey: 'ap1', taskId: task.taskId, kind: 'email.send', payload });
       assert.equal(first.state, 'pending');
@@ -132,7 +135,7 @@ export function runConformanceSuite(name: string, makeHarness: () => Conformance
         idempotencyKey: 'ap1',
         taskId: task.taskId,
         kind: 'email.send',
-        payload: { to: 'team@example.com' },
+        payload: EMAIL,
       });
       await drive(h, 'a', task.taskId);
       assert.equal(h.sideEffectCount('a', task.taskId), 0);
@@ -156,7 +159,7 @@ export function runConformanceSuite(name: string, makeHarness: () => Conformance
         idempotencyKey: 'ap1',
         taskId: task.taskId,
         kind: 'email.send',
-        payload: { to: 'team@example.com' },
+        payload: EMAIL,
       });
       await h.decideApproval('a', approval.approvalId, 'rejected');
       await drive(h, 'a', task.taskId);
