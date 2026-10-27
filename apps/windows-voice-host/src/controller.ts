@@ -20,6 +20,8 @@ export interface AudioDevice {
   stopCapture(): void;
   play(pcm: Uint8Array): void;
   stopPlayback(): void;
+  /** True while speech is still coming out of the speaker, even after the server has finished sending it. */
+  isPlaying(): boolean;
   /** A short tone, not speech. Capture started right after a chime waits for it to finish. */
   chime(kind: ChimeKind): void;
 }
@@ -71,6 +73,8 @@ export class HostController {
   private starting = false;
   /** True from the start of a session until the greeting has been spoken or skipped. */
   private greeting = false;
+  /** The greeting was fully sent but is still playing; listening starts when the speaker falls silent. */
+  private listenWhenDrained = false;
   private utteranceCount = 0;
   private expectedUtterance: string | undefined;
   /** After an interrupt, replies from the cut-off turn are ignored until the next utterance is recognised. */
@@ -112,14 +116,23 @@ export class HostController {
       this.settle = setTimeout(() => this.dispatch({ kind: 'ui', action: { type: 'settle' } }), SETTLE_MS);
     }
     if (message.type === 'tts.end' && this.greeting) {
-      // The greeting is over: open the microphone without another press.
+      // The greeting has been sent, not necessarily heard. Opening the microphone while it still
+      // plays would record the greeting as the person's speech.
       this.greeting = false;
-      this.command('summon');
+      if (this.audio.isPlaying()) this.listenWhenDrained = true;
+      else this.command('summon');
     }
     if (message.type === 'error' || message.type === 'session.closed') {
       this.greeting = false;
       this.stopAll();
     }
+  }
+
+  /** The speaker has finished everything it was given. */
+  onPlaybackDrained(): void {
+    if (!this.listenWhenDrained) return;
+    this.listenWhenDrained = false;
+    this.command('summon');
   }
 
   onSpeech(pcm: Uint8Array): void {
@@ -200,6 +213,9 @@ export class HostController {
         if (effect.on) {
           this.endpoint?.reset();
           this.greeting = false;
+          this.listenWhenDrained = false;
+          // Anything still playing would be heard by the microphone as the person speaking.
+          this.audio.stopPlayback();
           this.audio.chime('listening');
           this.audio.startCapture();
           this.dispatch({ kind: 'ui', action: { type: 'listen_start' } });
@@ -222,6 +238,7 @@ export class HostController {
         if (effect.message.type === 'interrupt') {
           this.audio.stopPlayback();
           this.discardReply = true;
+          this.listenWhenDrained = false;
           // Nothing recognised before the next utterance ends can be for it.
           this.expectedUtterance = 'interrupted';
           this.greeting = false;
@@ -238,6 +255,7 @@ export class HostController {
   }
 
   private stopAll(): void {
+    this.listenWhenDrained = false;
     clearTimeout(this.cap);
     clearTimeout(this.settle);
     clearTimeout(this.waiting);

@@ -91,6 +91,8 @@ const playing = new Set();
 
 let playedSamples = 0;
 let peak = 0;
+// Chunks started since playback last stopped. The main process compares it with how many it sent.
+let chunkCount = 0;
 
 function play(pcm) {
   if (context.state !== 'running') void context.resume();
@@ -113,7 +115,11 @@ function play(pcm) {
   playing.add(node);
   if (playedSamples === 0) window.hostAudio.info(`speaker: first chunk, audio ${context.state} at ${context.sampleRate} Hz`);
   playedSamples += samples.length;
-  node.onended = () => playing.delete(node);
+  chunkCount++;
+  node.onended = () => {
+    playing.delete(node);
+    if (playing.size === 0) window.hostAudio.drained(chunkCount);
+  };
 }
 
 function stopPlayback() {
@@ -127,6 +133,7 @@ function stopPlayback() {
   }
   playing.clear();
   playAt = 0;
+  chunkCount = 0;
   if (playedSamples) window.hostAudio.info(`speaker: ${(playedSamples / RATE).toFixed(1)} s of speech scheduled`);
   playedSamples = 0;
 }

@@ -70,11 +70,24 @@ let tray: Tray | undefined;
 let client: VoiceClient | undefined;
 let quitting = false;
 
+/** Chunks handed to the speaker since playback last stopped, and whether any may still be audible. */
+let chunksSent = 0;
+let speakerBusy = false;
+
 const audio: AudioDevice = {
   startCapture: () => audioWindow?.webContents.send('capture', true),
   stopCapture: () => audioWindow?.webContents.send('capture', false),
-  play: (pcm) => audioWindow?.webContents.send('play', pcm),
-  stopPlayback: () => audioWindow?.webContents.send('stop-playback'),
+  play: (pcm) => {
+    chunksSent++;
+    speakerBusy = true;
+    audioWindow?.webContents.send('play', pcm);
+  },
+  stopPlayback: () => {
+    chunksSent = 0;
+    speakerBusy = false;
+    audioWindow?.webContents.send('stop-playback');
+  },
+  isPlaying: () => speakerBusy,
   chime: (kind) => audioWindow?.webContents.send('chime', kind),
 };
 
@@ -303,6 +316,12 @@ if (!app.requestSingleInstanceLock()) {
         panel?.webContents.send('panel-level', level);
         controller.onLevel(level);
       }
+    });
+    ipcMain.on('playback-drained', (event, count: unknown) => {
+      // Only the report that covers every chunk sent so far means the speaker is quiet.
+      if (event.sender !== audioWindow?.webContents || count !== chunksSent) return;
+      speakerBusy = false;
+      controller.onPlaybackDrained();
     });
     ipcMain.on('audio-info', (event, message: unknown) => {
       if (event.sender !== audioWindow?.webContents) return;

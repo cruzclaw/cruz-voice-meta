@@ -8,13 +8,27 @@ import { createDemoServer, type DemoServer } from '../../demo-server/src/server.
 import { VoiceClient } from '../src/client.js';
 import { HostController, type AudioDevice, type ChimeKind, type Link } from '../src/controller.js';
 
+/** A speaker that keeps sounding for a while after the last chunk, like the real one. */
 class FakeAudio implements AudioDevice {
   calls: string[] = [];
   played = 0;
+  busy = false;
+  /** Called when the speaker falls silent by itself. Not called when playback is stopped. */
+  onDrained: (() => void) | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  constructor(public lingerMs = 80) {}
   startCapture() { this.calls.push('start'); }
   stopCapture() { this.calls.push('stop'); }
-  play(pcm: Uint8Array) { this.played += pcm.byteLength; }
-  stopPlayback() { this.calls.push('stopPlayback'); }
+  play(pcm: Uint8Array) {
+    this.played += pcm.byteLength;
+    this.busy = true;
+    clearTimeout(this.timer);
+    if (Number.isFinite(this.lingerMs)) {
+      this.timer = setTimeout(() => { this.busy = false; this.onDrained?.(); }, this.lingerMs);
+    }
+  }
+  stopPlayback() { this.calls.push('stopPlayback'); this.busy = false; clearTimeout(this.timer); }
+  isPlaying() { return this.busy; }
   chime(kind: ChimeKind) { this.calls.push(`chime:${kind}`); }
 }
 
@@ -89,6 +103,7 @@ function host(token: string, now: () => number = Date.now) {
     },
   };
   controller = new HostController(link, audio, { now, endpoint: new EndpointDetector() });
+  audio.onDrained = () => controller.onPlaybackDrained();
   const open = async () => {
     client = make();
     await client.openConnection();
@@ -133,6 +148,21 @@ describe('Windows voice host against the demo server', () => {
     assert.ok(h.audio.played > greetingBytes, 'the reply reached the speaker');
     const inputEnds = h.sent.filter((m) => m.type === 'input.end') as Array<{ utteranceId: string }>;
     assert.deepEqual(inputEnds.map((m) => m.utteranceId), ['host-1']);
+    h.close();
+  });
+
+  it('does not open the microphone while the greeting is still playing out of the speaker', async () => {
+    const h = host('good');
+    await h.open();
+    h.audio.lingerMs = 600;
+    h.controller.command('summon');
+    await until(() => ended(h) === 1);
+    // The server has finished sending, but the speaker is still sounding.
+    assert.equal(h.audio.busy, true);
+    assert.equal(h.audio.calls.includes('start'), false, 'microphone stays closed while the speaker is busy');
+    assert.notEqual(h.controller.display, 'listening');
+    await until(() => h.audio.calls.includes('start'));
+    assert.equal(h.audio.busy, false, 'it opened only after the speaker went quiet');
     h.close();
   });
 
@@ -228,7 +258,7 @@ describe('Windows voice host against the demo server', () => {
 
 /** Controller behaviour with a scripted link, for cases that depend on exact message timing. */
 function scripted(options: ConstructorParameters<typeof HostController>[2] = {}) {
-  const audio = new FakeAudio();
+  const audio = new FakeAudio(Number.POSITIVE_INFINITY); // drained by hand with c.onPlaybackDrained()
   const sent: ClientMessage[] = [];
   const starts: boolean[] = [];
   let failWith: Error | undefined;
@@ -317,6 +347,40 @@ describe('HostController timing and interrupts', () => {
     assert.equal(t.c.display, 'listening');
     t.server({ type: 'tts.cancelled', ttsId: 't' });
     assert.equal(t.c.display, 'listening');
+    t.c.dispose();
+  });
+
+  it('waits for the speaker to drain before listening, and a press then cuts the rest off first', () => {
+    const t = scripted();
+    t.c.command('summon'); // starts the session; the greeting is under way
+    t.server({ type: 'session.ready', sessionId: 's', audio: t.fmt });
+    t.server({ type: 'tts.start', ttsId: 'g', turnId: 'turn-1', audio: t.fmt });
+    t.c.onSpeech(new Uint8Array(960)); // still playing
+    t.server({ type: 'tts.end', ttsId: 'g' });
+    assert.equal(t.audio.calls.includes('start'), false, 'no microphone while the speaker is busy');
+    t.c.onPlaybackDrained();
+    assert.equal(t.c.display, 'listening');
+    assert.deepEqual(t.audio.calls.filter((x) => x.startsWith('chime') || x === 'start'), ['chime:listening', 'start']);
+    t.c.dispose();
+  });
+
+  it('a drain report that arrives for anything but a finished greeting does nothing', () => {
+    const t = scripted();
+    t.active();
+    t.c.onPlaybackDrained();
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.audio.calls.includes('start'), false);
+    t.c.dispose();
+  });
+
+  it('opening the microphone always silences any speech still playing', () => {
+    const t = scripted();
+    t.active();
+    t.audio.play(new Uint8Array(960));
+    assert.equal(t.audio.isPlaying(), true);
+    t.c.command('summon');
+    assert.equal(t.audio.isPlaying(), false);
+    assert.ok(t.audio.calls.indexOf('stopPlayback') < t.audio.calls.indexOf('start'));
     t.c.dispose();
   });
 

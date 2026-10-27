@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('hostAudio', {
   onBeep: (callback) => ipcRenderer.on('beep', () => callback()),
   onStopPlayback: (callback) => ipcRenderer.on('stop-playback', () => callback()),
   sendMic: (buffer) => ipcRenderer.send('mic', buffer),
+  drained: (count) => ipcRenderer.send('playback-drained', count),
   sendLevel: (level) => ipcRenderer.send('level', level),
   info: (message) => ipcRenderer.send('audio-info', String(message)),
   reportError: (message) => ipcRenderer.send('audio-error', String(message)),
