@@ -2,7 +2,7 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron';
-import { DEFAULT_SHORTCUT, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
+import { DEFAULT_SHORTCUT, EndpointDetector, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
 import { VoiceClient } from './client.js';
 import { HostController, type AudioDevice } from './controller.js';
 
@@ -18,6 +18,9 @@ const SHORTCUT = process.env.VOICE_SHORTCUT ?? DEFAULT_SHORTCUT;
 /** Set VOICE_DEBUG_DUMP=1 to save the last thing the microphone heard as a WAV file in the temp folder. */
 const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
 const PANEL_HEIGHT = 250;
+/** Listening ends by itself after this much quiet. Set VOICE_AUTO_END=0 to end it with a second press only. */
+const AUTO_END = process.env.VOICE_AUTO_END !== '0';
+const END_SILENCE_MS = Math.min(3000, Math.max(300, Number(process.env.VOICE_END_SILENCE_MS) || 900));
 
 const STATE_COLOR: Record<DisplayState, [number, number, number]> = {
   disconnected: [120, 120, 120],
@@ -90,6 +93,8 @@ const controller = new HostController(
     if (!wasListening && listening) utterance = [];
     wasListening = listening;
   },
+  undefined,
+  AUTO_END ? new EndpointDetector({ endSilenceMs: END_SILENCE_MS }) : undefined,
 );
 
 let lastErrorShown: PanelState['lastError'];
@@ -105,6 +110,7 @@ function pushPanel(state: PanelState, display: DisplayState): void {
     approval: waiting,
     error: state.lastError && display !== 'listening' ? state.lastError.message : undefined,
     shortcut: SHORTCUT,
+    autoEnd: AUTO_END,
   });
 }
 
@@ -228,6 +234,7 @@ function trayMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: `Talk (${SHORTCUT})`, click: () => summon() },
     { label: 'Show panel', click: () => panel?.showInactive() },
+    { label: 'Test speaker', click: () => audioWindow?.webContents.send('beep') },
     { label: 'Stop speaking', click: () => controller.command('stop_speaking') },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() },
@@ -258,6 +265,7 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.on('level', (event, level: unknown) => {
       if (event.sender === audioWindow?.webContents && typeof level === 'number' && controller.state.phase === 'listening') {
         panel?.webContents.send('panel-level', level);
+        controller.onLevel(level);
       }
     });
     ipcMain.on('audio-info', (event, message: unknown) => {
@@ -289,6 +297,9 @@ if (!app.requestSingleInstanceLock()) {
     const result = shortcuts.apply(SHORTCUT, ['Ctrl+Alt+Space']);
     if (result.status === 'conflict' || result.status === 'invalid') log(`no shortcut could be registered. Use the tray icon to talk.`);
     else if (result.status === 'fallback') log(`${SHORTCUT} is taken by another app. Using ${result.active} instead.`);
+
+    // In debug mode, play a test tone once the audio window is ready.
+    if (DUMP) audioWindow.webContents.once('did-finish-load', () => setTimeout(() => audioWindow?.webContents.send('beep'), 1000));
 
     void connectLoop();
   });

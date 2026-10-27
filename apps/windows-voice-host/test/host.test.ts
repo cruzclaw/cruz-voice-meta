@@ -4,6 +4,7 @@ import type { ServerMessage } from '@cruzclaw/voice-core';
 import type { Synthesizer } from '../../demo-server/src/ports.js';
 import { RuleReasoner, ScriptedTranscriber } from '../../demo-server/src/mock-providers.js';
 import { createDemoServer, type DemoServer } from '../../demo-server/src/server.js';
+import { EndpointDetector } from '@cruzclaw/windows-bridge';
 import { VoiceClient } from '../src/client.js';
 import { HostController, type AudioDevice } from '../src/controller.js';
 
@@ -134,6 +135,57 @@ describe('Windows voice host against the demo server', () => {
     c.onServer({ v: 1, seq: 1, type: 'transcript.final', utteranceId: 'u', text: 'hello' });
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(c.display, 'thinking');
+    c.dispose();
+  });
+
+  it('ends listening by itself when the person stops talking, with no second press', () => {
+    const sent: string[] = [];
+    const audio = new FakeAudio();
+    const c = new HostController({ send: (m) => void sent.push(m.type), sendMic: () => undefined }, audio, () => undefined, 15000, new EndpointDetector());
+    c.setConnected(true);
+    c.command('summon');
+    for (let i = 0; i < 30; i++) c.onLevel(0.08); // 1.2 s of speech
+    assert.equal(c.display, 'listening');
+    for (let i = 0; i < 22; i++) c.onLevel(0.003);
+    assert.equal(c.display, 'listening', 'not yet: under 0.9 s of quiet');
+    c.onLevel(0.003);
+    assert.equal(c.display, 'thinking');
+    assert.deepEqual(sent, ['input.end']);
+    assert.equal(audio.calls.at(-1), 'stop');
+    c.dispose();
+  });
+
+  it('drops listening quietly when nothing is said, and tells the server the input ended', () => {
+    const sent: string[] = [];
+    const c = new HostController({ send: (m) => void sent.push(m.type), sendMic: () => undefined }, new FakeAudio(), () => undefined, 15000, new EndpointDetector());
+    c.setConnected(true);
+    c.command('summon');
+    for (let i = 0; i < 200; i++) c.onLevel(0.003);
+    assert.equal(c.display, 'idle');
+    assert.equal(c.state.lastError?.code, 'NO_SPEECH');
+    assert.deepEqual(sent, ['input.end']);
+    c.dispose();
+  });
+
+  it('forgets the last turn: a new press starts listening for speech afresh', () => {
+    const c = new HostController({ send: () => undefined, sendMic: () => undefined }, new FakeAudio(), () => undefined, 15000, new EndpointDetector());
+    c.setConnected(true);
+    for (let turn = 0; turn < 2; turn++) {
+      c.command('summon');
+      for (let i = 0; i < 30; i++) c.onLevel(0.08);
+      for (let i = 0; i < 25; i++) c.onLevel(0.003);
+      assert.equal(c.display, 'thinking', `turn ${turn}`);
+      c.onServer({ v: 1, seq: turn * 10 + 1, type: 'error', code: 'PROVIDER_ERROR', message: 'x', retryable: true });
+    }
+    c.dispose();
+  });
+
+  it('without a detector, only the shortcut ends listening', () => {
+    const c = new HostController({ send: () => undefined, sendMic: () => undefined }, new FakeAudio());
+    c.setConnected(true);
+    c.command('summon');
+    for (let i = 0; i < 400; i++) c.onLevel(0.003);
+    assert.equal(c.display, 'listening');
     c.dispose();
   });
 

@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('hostAudio', {
   onCapture: (callback) => ipcRenderer.on('capture', (_event, on) => callback(Boolean(on))),
   onPlay: (callback) => ipcRenderer.on('play', (_event, pcm) => callback(pcm)),
+  onBeep: (callback) => ipcRenderer.on('beep', () => callback()),
   onStopPlayback: (callback) => ipcRenderer.on('stop-playback', () => callback()),
   sendMic: (buffer) => ipcRenderer.send('mic', buffer),
   sendLevel: (level) => ipcRenderer.send('level', level),

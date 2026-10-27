@@ -24,6 +24,7 @@ The controller and client are tested against the real demo server with a fake mi
 
 ## Known limits
 
-- Microphone audio goes to the server only between the two presses; there is no voice activity detection yet.
+- Listening ends by itself after about 0.9 s of quiet following speech (`VOICE_END_SILENCE_MS` sets it, 300 to 3000; `VOICE_AUTO_END=0` turns it off, leaving the second press). It judges from the microphone level only, so a sudden loud noise can look like speech and a long pause to think can end a turn. The second press and the 55 s cap are the backstops. Listening with no speech for 8 s is dropped.
+- Microphone audio goes to the server only between the first press and the end of listening.
 - Approvals still go through the demo server's HTTP endpoint, not the host.
 - No panel window, so there is no text on screen.

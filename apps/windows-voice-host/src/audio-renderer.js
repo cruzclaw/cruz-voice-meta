@@ -49,6 +49,7 @@ let playAt = 0;
 const playing = new Set();
 
 let playedSamples = 0;
+let peak = 0;
 
 function play(pcm) {
   if (context.state !== 'running') void context.resume();
@@ -57,7 +58,10 @@ function play(pcm) {
   if (!samples.length) return;
   const buffer = context.createBuffer(1, samples.length, RATE);
   const data = buffer.getChannelData(0);
-  for (let i = 0; i < samples.length; i++) data[i] = samples[i] / 0x8000;
+  for (let i = 0; i < samples.length; i++) {
+    data[i] = samples[i] / 0x8000;
+    peak = Math.max(peak, Math.abs(data[i]));
+  }
   const node = context.createBufferSource();
   node.buffer = buffer;
   node.connect(context.destination);
@@ -89,11 +93,26 @@ function stopPlayback() {
 // Speech ends on its own when the queue drains, so report once the last chunk finishes.
 setInterval(() => {
   if (playedSamples && playing.size === 0) {
-    window.hostAudio.info(`speaker: ${(playedSamples / RATE).toFixed(1)} s of speech played`);
+    window.hostAudio.info(`speaker: ${(playedSamples / RATE).toFixed(1)} s of speech played, loudest sample ${peak.toFixed(2)}`);
     playedSamples = 0;
+    peak = 0;
   }
 }, 500);
 
+// A plain tone, to tell apart "no sound from this app at all" from "the speech is silent".
+function beep() {
+  void context.resume();
+  const osc = context.createOscillator();
+  const gain = context.createGain();
+  gain.gain.value = 0.2;
+  osc.frequency.value = 440;
+  osc.connect(gain).connect(context.destination);
+  osc.start();
+  osc.stop(context.currentTime + 0.6);
+  window.hostAudio.info(`test tone played, audio ${context.state}`);
+}
+
+window.hostAudio.onBeep(beep);
 window.hostAudio.onCapture((on) => (on ? startCapture() : stopCapture()));
 window.hostAudio.onPlay(play);
 window.hostAudio.onStopPlayback(stopPlayback);

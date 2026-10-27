@@ -12,7 +12,7 @@ window.panel.onState((s) => {
   set($('reply'), s.reply);
   $('talk').textContent = s.display === 'listening' ? 'Done talking' : s.display === 'speaking' ? 'Interrupt' : 'Talk';
   $('talk').disabled = !s.connected;
-  $('hint').textContent = s.connected ? `or press ${s.shortcut}` : '';
+  $('hint').textContent = !s.connected ? '' : s.display === 'listening' && s.autoEnd ? 'stops when you stop talking' : `or press ${s.shortcut}`;
   const note = $('note');
   const text = s.approval ? `Needs your approval: ${s.approval}` : s.error;
   note.hidden = !text;

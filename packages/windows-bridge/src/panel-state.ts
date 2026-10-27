@@ -62,7 +62,9 @@ export type UiAction =
   /** The shell calls this a moment after the reply text ends if no speech began. */
   | { type: 'settle' }
   /** The shell calls this when nothing was recognised and the server stayed silent. */
-  | { type: 'no_response' };
+  | { type: 'no_response' }
+  /** The person pressed to talk but said nothing, so listening was dropped. */
+  | { type: 'listen_cancel' };
 
 export type PanelEvent =
   | { kind: 'server'; message: ServerMessage }
@@ -181,6 +183,10 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
       return { ...s, visible: false };
     case 'settle':
       return s.phase === 'thinking' && s.replyDone ? { ...s, phase: 'idle', replyDone: false } : s;
+    case 'listen_cancel':
+      return s.phase === 'listening'
+        ? { ...s, phase: 'idle', lastError: { code: 'NO_SPEECH', message: 'I did not hear anything. Try again.', retryable: true } }
+        : s;
     case 'no_response':
       // Only when nothing was transcribed. A slow answer to real speech keeps waiting.
       return s.phase === 'thinking' && s.transcript === ''

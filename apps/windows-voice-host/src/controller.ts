@@ -1,5 +1,6 @@
 import {
   displayState,
+  type EndpointDetector,
   effectsFor,
   initialPanelState,
   reducePanel,
@@ -47,6 +48,8 @@ export class HostController {
     private readonly audio: AudioDevice,
     private readonly onChange: (state: PanelState, display: DisplayState) => void = () => undefined,
     private readonly noResponseMs = NO_RESPONSE_MS,
+    /** When given, listening ends by itself once the person stops talking. */
+    private readonly endpoint?: EndpointDetector,
   ) {}
 
   get display(): DisplayState {
@@ -78,6 +81,23 @@ export class HostController {
     if (this.state.phase === 'listening') this.link.sendMic(pcm);
   }
 
+  /** One microphone level per frame while listening. Ends or drops the turn when the person goes quiet. */
+  onLevel(level: number): void {
+    if (this.state.phase !== 'listening' || !this.endpoint) return;
+    const event = this.endpoint.feed(level);
+    if (event === 'speech_ended') this.command('summon');
+    else if (event === 'no_speech') this.cancelListening();
+  }
+
+  /** Stops listening without waiting for a reply. The server is still told the input ended so it discards the audio. */
+  private cancelListening(): void {
+    if (this.state.phase !== 'listening') return;
+    clearTimeout(this.cap);
+    this.audio.stopCapture();
+    this.link.send({ v: 1, type: 'input.end' });
+    this.dispatch({ kind: 'ui', action: { type: 'listen_cancel' } });
+  }
+
   command(command: Command): void {
     for (const effect of effectsFor(this.state, command)) this.apply(effect);
   }
@@ -91,6 +111,7 @@ export class HostController {
     switch (effect.type) {
       case 'capture':
         if (effect.on) {
+          this.endpoint?.reset();
           this.audio.startCapture();
           this.dispatch({ kind: 'ui', action: { type: 'listen_start' } });
           clearTimeout(this.cap);
