@@ -5,11 +5,12 @@
   "description": "Public voice modules for CruzClaw built on Meta models, with a standalone synthetic demo.",
   "workspaces": [
     "packages/*",
-    "examples/*"
+    "examples/*",
+    "apps/*"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test packages/voice-core/test/*.test.ts examples/mock-employee/test/*.test.ts"
+    "test": "tsx --test packages/voice-core/test/*.test.ts examples/mock-employee/test/*.test.ts apps/demo-server/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

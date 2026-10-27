@@ -1,0 +1,19 @@
+{
+  "name": "@cruzclaw/demo-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone voice session server with mock speech and reasoning providers and a synthetic employee. Runs with no credentials.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "scripts": {
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@cruzclaw/mock-employee": "*",
+    "@cruzclaw/voice-core": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0"
+  }
+}

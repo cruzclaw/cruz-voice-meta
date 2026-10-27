@@ -19,6 +19,9 @@
       ],
       "@cruzclaw/voice-core/conformance": [
         "packages/voice-core/src/conformance-entry.ts"
+      ],
+      "@cruzclaw/mock-employee": [
+        "examples/mock-employee/src/index.ts"
       ]
     }
   },
@@ -26,6 +29,8 @@
     "packages/*/src",
     "packages/*/test",
     "examples/*/src",
-    "examples/*/test"
+    "examples/*/test",
+    "apps/*/src",
+    "apps/*/test"
   ]
 }
