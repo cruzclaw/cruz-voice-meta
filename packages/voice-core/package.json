@@ -8,6 +8,9 @@
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
+  "typesVersions": {
+    "*": { "conformance": ["dist/types/conformance-entry.d.ts"] }
+  },
   "exports": {
     ".": {
       "types": "./dist/types/index.d.ts",
