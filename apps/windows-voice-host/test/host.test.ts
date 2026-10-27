@@ -69,7 +69,7 @@ after(() => demo.close());
 const ended = (h: { seen: ServerMessage[] }) => h.seen.filter((m) => m.type === 'tts.end').length;
 
 /** A host wired like the real app: one connection at launch, a session only when the person presses. */
-function host(token: string, now: () => number = Date.now) {
+function host(token: string, now: () => number = Date.now, followUp = true) {
   const audio = new FakeAudio();
   const seen: ServerMessage[] = [];
   const closed: string[] = [];
@@ -102,7 +102,7 @@ function host(token: string, now: () => number = Date.now) {
       await client!.startSession('conv-test');
     },
   };
-  controller = new HostController(link, audio, { now, endpoint: new EndpointDetector() });
+  controller = new HostController(link, audio, { now, followUp, endpoint: new EndpointDetector() });
   audio.onDrained = () => controller.onPlaybackDrained();
   const open = async () => {
     client = make();
@@ -166,6 +166,37 @@ describe('Windows voice host against the demo server', () => {
     h.close();
   });
 
+  it('after an answer it listens for a follow-up by itself, once the speaker is quiet', async () => {
+    const h = host('good');
+    await h.open();
+    h.controller.command('summon');
+    await until(() => h.controller.display === 'listening');
+    speak(h.controller);
+    await until(() => ended(h) === 2);
+    // The answer was sent; the speaker is still sounding, so the microphone stays closed for now.
+    assert.equal(h.audio.calls.filter((c) => c === 'start').length, 1);
+    await until(() => h.audio.calls.filter((c) => c === 'start').length === 2);
+    assert.equal(h.audio.busy, false);
+    assert.equal(h.controller.display, 'listening');
+    assert.deepEqual(h.audio.calls.filter((c) => c.startsWith('chime')), ['chime:listening', 'chime:thinking', 'chime:listening']);
+    assert.deepEqual(h.sessionsStarted, [false], 'same session: no new greeting');
+    h.close();
+  });
+
+  it('a follow-up window nobody speaks into ends quietly: no chime, no error, back to ready', async () => {
+    const h = host('good');
+    await h.open();
+    h.controller.command('summon');
+    await until(() => h.controller.display === 'listening');
+    speak(h.controller);
+    await until(() => h.audio.calls.filter((c) => c === 'start').length === 2);
+    for (let i = 0; i < 210; i++) h.controller.onLevel(0.003);
+    assert.equal(h.controller.display, 'idle');
+    assert.equal(h.controller.state.lastError, undefined);
+    assert.equal(h.audio.calls.includes('chime:cancelled'), false);
+    h.close();
+  });
+
   it('a press while the greeting plays skips it and listens at once', async () => {
     const h = host('good');
     await h.open();
@@ -182,7 +213,7 @@ describe('Windows voice host against the demo server', () => {
   });
 
   it('later presses just chime and listen, with no new greeting', async () => {
-    const h = host('good');
+    const h = host('good', Date.now, false);
     await h.open();
     h.controller.command('summon');
     await until(() => h.controller.display === 'listening');
@@ -196,7 +227,7 @@ describe('Windows voice host against the demo server', () => {
 
   it('a press after a long quiet spell starts a fresh session with a new greeting', async () => {
     let clock = 1_000_000;
-    const h = host('good', () => clock);
+    const h = host('good', () => clock, false);
     await h.open();
     h.controller.command('summon');
     await until(() => h.controller.display === 'listening');
@@ -382,6 +413,37 @@ describe('HostController timing and interrupts', () => {
     assert.equal(t.audio.isPlaying(), false);
     assert.ok(t.audio.calls.indexOf('stopPlayback') < t.audio.calls.indexOf('start'));
     t.c.dispose();
+  });
+
+  it('does not listen for a follow-up after an interrupted answer, an error, or when it is switched off', () => {
+    const answer = (t: ReturnType<typeof scripted>, then: () => void) => {
+      t.active();
+      t.c.command('summon');
+      t.c.command('summon'); // end listening, thinking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'hello' });
+      t.server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'Hi.' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      then();
+    };
+    const starts = (t: ReturnType<typeof scripted>) => t.audio.calls.filter((x) => x === 'start').length;
+
+    const normal = scripted();
+    answer(normal, () => normal.server({ type: 'tts.end', ttsId: 't' }));
+    assert.equal(starts(normal), 2, 'the baseline: it does listen again');
+
+    const interrupted = scripted();
+    answer(interrupted, () => { interrupted.c.command('summon'); interrupted.server({ type: 'tts.end', ttsId: 't' }); });
+    assert.equal(starts(interrupted), 2, 'one listen from the first press, one from the cut-in; no extra');
+
+    const failed = scripted();
+    answer(failed, () => failed.server({ type: 'error', code: 'PROVIDER_ERROR', message: 'x', retryable: true }));
+    failed.server({ type: 'tts.end', ttsId: 't' });
+    assert.equal(starts(failed), 1);
+
+    const off = scripted({ followUp: false });
+    answer(off, () => off.server({ type: 'tts.end', ttsId: 't' }));
+    assert.equal(starts(off), 1);
+    for (const t of [normal, interrupted, failed, off]) t.c.dispose();
   });
 
   it('a press with no session starts one, and a normal press afterwards does not', async () => {

@@ -10,6 +10,8 @@
 3. Press the shortcut. The first press (and the first after 15 minutes of quiet) opens a session and the assistant greets you by name; when the greeting ends it listens on its own. Later presses chime and listen straight away.
 4. Speak, then stop. About 0.9 s of quiet ends your turn and a second chime means it is thinking. Press the shortcut at any time, while it is thinking or speaking, to cut in: it stops and listens.
 
+After each answer finishes playing it listens for a follow-up by itself (rising chime). Say nothing for about 8 s and it returns to ready without a message. `VOICE_FOLLOW_UP=0` turns this off, so every turn needs a press. It never listens while the speaker is still sounding, because the microphone would record the assistant.
+
 Chimes are generated tones: rising when it starts listening, falling when it starts thinking, short and low when nothing was heard.
 
 Electron's binary is not fetched by npm 11 (install scripts are skipped). If `npm start` says Electron is missing, run `node node_modules/electron/install.js` once.

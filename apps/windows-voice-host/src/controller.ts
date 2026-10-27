@@ -40,6 +40,8 @@ export interface ControllerOptions {
   endpoint?: EndpointDetector;
   /** If nothing comes back after the person stops talking, stop showing "thinking". */
   noResponseMs?: number;
+  /** After an answer has been spoken, listen for a reply without another press. */
+  followUp?: boolean;
   /** A press after this long without activity starts a new session, with a new greeting. */
   idleGreetMs?: number;
   now?: () => number;
@@ -66,6 +68,7 @@ export class HostController {
   private readonly noResponseMs: number;
   private readonly idleGreetMs: number;
   private readonly now: () => number;
+  private readonly followUp: boolean;
   private settle: ReturnType<typeof setTimeout> | undefined;
   private cap: ReturnType<typeof setTimeout> | undefined;
   private waiting: ReturnType<typeof setTimeout> | undefined;
@@ -75,6 +78,11 @@ export class HostController {
   private greeting = false;
   /** The greeting was fully sent but is still playing; listening starts when the speaker falls silent. */
   private listenWhenDrained = false;
+  /** The person spoke and the answer has not finished yet, so listening for a follow-up is due after it. */
+  private followUpDue = false;
+  /** The listening that is now open is a follow-up window. Saying nothing then ends it quietly. */
+  private quietListen = false;
+  private nextListenQuiet = false;
   private utteranceCount = 0;
   private expectedUtterance: string | undefined;
   /** After an interrupt, replies from the cut-off turn are ignored until the next utterance is recognised. */
@@ -90,6 +98,7 @@ export class HostController {
     this.noResponseMs = options.noResponseMs ?? NO_RESPONSE_MS;
     this.idleGreetMs = options.idleGreetMs ?? IDLE_GREET_MS;
     this.now = options.now ?? Date.now;
+    this.followUp = options.followUp ?? true;
   }
 
   get display(): DisplayState {
@@ -106,6 +115,7 @@ export class HostController {
     // A recognised utterance that is not the latest one belongs to a turn the person already left.
     if ((message.type === 'transcript.final' || message.type === 'transcript.partial') && this.expectedUtterance && message.utteranceId !== this.expectedUtterance) return;
     if (message.type === 'transcript.final' || message.type === 'session.ready') this.discardReply = false;
+    if (message.type === 'transcript.final') this.followUpDue = this.followUp;
     if (this.discardReply && REPLY_MESSAGES.includes(message.type)) return;
 
     this.dispatch({ kind: 'server', message });
@@ -114,6 +124,13 @@ export class HostController {
     if (message.type === 'assistant.text.done') {
       clearTimeout(this.settle);
       this.settle = setTimeout(() => this.dispatch({ kind: 'ui', action: { type: 'settle' } }), SETTLE_MS);
+    }
+    if (message.type === 'tts.end' && !this.greeting && this.followUpDue && !this.discardReply) {
+      // The answer is out. Listen for a reply, once the speaker has really finished.
+      this.followUpDue = false;
+      this.nextListenQuiet = true;
+      if (this.audio.isPlaying()) this.listenWhenDrained = true;
+      else this.command('summon');
     }
     if (message.type === 'tts.end' && this.greeting) {
       // The greeting has been sent, not necessarily heard. Opening the microphone while it still
@@ -179,6 +196,7 @@ export class HostController {
     try {
       // Set before the session starts: the greeting begins as soon as the server says ready.
       this.greeting = true;
+      this.followUpDue = false;
       this.discardReply = false;
       this.expectedUtterance = undefined;
       await this.link.startSession(fresh);
@@ -195,9 +213,10 @@ export class HostController {
     if (this.state.phase !== 'listening') return;
     clearTimeout(this.cap);
     this.audio.stopCapture();
-    this.audio.chime('cancelled');
+    const quiet = this.quietListen;
+    if (!quiet) this.audio.chime('cancelled');
     this.sendInputEnd();
-    this.dispatch({ kind: 'ui', action: { type: 'listen_cancel' } });
+    this.dispatch({ kind: 'ui', action: { type: 'listen_cancel', quiet } });
   }
 
   private sendInputEnd(): void {
@@ -212,6 +231,9 @@ export class HostController {
       case 'capture':
         if (effect.on) {
           this.endpoint?.reset();
+          this.quietListen = this.nextListenQuiet;
+          this.nextListenQuiet = false;
+          this.followUpDue = false;
           this.greeting = false;
           this.listenWhenDrained = false;
           // Anything still playing would be heard by the microphone as the person speaking.
@@ -239,6 +261,8 @@ export class HostController {
           this.audio.stopPlayback();
           this.discardReply = true;
           this.listenWhenDrained = false;
+          this.followUpDue = false;
+          this.nextListenQuiet = false;
           // Nothing recognised before the next utterance ends can be for it.
           this.expectedUtterance = 'interrupted';
           this.greeting = false;
@@ -256,6 +280,8 @@ export class HostController {
 
   private stopAll(): void {
     this.listenWhenDrained = false;
+    this.followUpDue = false;
+    this.nextListenQuiet = false;
     clearTimeout(this.cap);
     clearTimeout(this.settle);
     clearTimeout(this.waiting);

@@ -175,6 +175,14 @@ describe('controls', () => {
     assert.deepEqual(e.at(-1), { type: 'capture', on: true });
   });
 
+  it('a quiet listen_cancel returns to idle without an error; a normal one reports nothing heard', () => {
+    const listening = run([ui({ type: 'listen_start' })], ready());
+    const quiet = run([ui({ type: 'listen_cancel', quiet: true })], listening);
+    assert.equal(displayState(quiet), 'idle');
+    assert.equal(quiet.lastError, undefined);
+    assert.equal(run([ui({ type: 'listen_cancel' })], listening).lastError?.code, 'NO_SPEECH');
+  });
+
   it('an interrupt returns thinking or speaking to idle, and a failed session shows its message', () => {
     const thinking = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' }), ui({ type: 'interrupted' })], ready());
     assert.equal(displayState(thinking), 'idle');

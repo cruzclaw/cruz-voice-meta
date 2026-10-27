@@ -21,6 +21,8 @@ const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
 const PANEL_HEIGHT = 250;
 /** Listening ends by itself after this much quiet. Set VOICE_AUTO_END=0 to end it with a second press only. */
 const AUTO_END = process.env.VOICE_AUTO_END !== '0';
+/** After each answer it listens for a reply by itself. Set VOICE_FOLLOW_UP=0 to need a press every time. */
+const FOLLOW_UP = process.env.VOICE_FOLLOW_UP !== '0';
 const END_SILENCE_MS = Math.min(3000, Math.max(300, Number(process.env.VOICE_END_SILENCE_MS) || 900));
 
 const STATE_COLOR: Record<DisplayState, [number, number, number]> = {
@@ -102,6 +104,7 @@ const controller = new HostController(
   },
   audio,
   {
+    followUp: FOLLOW_UP,
     ...(AUTO_END ? { endpoint: new EndpointDetector({ endSilenceMs: END_SILENCE_MS }) } : {}),
     onChange: (state, display) => {
     tray?.setImage(dot(display));

@@ -64,7 +64,7 @@ export type UiAction =
   /** The shell calls this when nothing was recognised and the server stayed silent. */
   | { type: 'no_response' }
   /** The person pressed to talk but said nothing, so listening was dropped. */
-  | { type: 'listen_cancel' }
+  | { type: 'listen_cancel'; quiet?: boolean }
   /** The person cut the assistant off, while it was thinking or speaking. */
   | { type: 'interrupted' }
   /** A session could not be opened. */
@@ -193,6 +193,8 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
     case 'session_failed':
       return { ...s, phase: 'idle', lastError: { code: 'SESSION', message: a.message.slice(0, 200), retryable: true } };
     case 'listen_cancel':
+      // A follow-up window that simply went unused is not an error.
+      if (a.quiet) return s.phase === 'listening' ? { ...s, phase: 'idle' } : s;
       return s.phase === 'listening'
         ? { ...s, phase: 'idle', lastError: { code: 'NO_SPEECH', message: 'I did not hear anything. Try again.', retryable: true } }
         : s;
