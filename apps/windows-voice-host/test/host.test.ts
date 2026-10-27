@@ -51,6 +51,10 @@ before(async () => {
 });
 after(() => demo.close());
 
+const ended = (h: { seen: ServerMessage[] }) => h.seen.filter((m) => m.type === 'tts.end').length;
+/** The assistant speaks first, so wait for that to finish before the person's turn. */
+const afterGreeting = (h: { seen: ServerMessage[] }) => until(() => ended(h) === 1, 8000);
+
 function host(token: string) {
   const audio = new FakeAudio();
   const seen: ServerMessage[] = [];
@@ -70,6 +74,10 @@ describe('Windows voice host against the demo server', () => {
     const h = host('good');
     await h.client.connect();
     h.controller.setConnected(true);
+    await afterGreeting(h);
+    assert.ok(h.audio.played > 0, 'the greeting was spoken');
+    assert.match(h.controller.state.reply, /how can I help/i);
+    const greetingBytes = h.audio.played;
     assert.equal(h.controller.display, 'idle');
 
     h.controller.command('summon');
@@ -79,8 +87,8 @@ describe('Windows voice host against the demo server', () => {
     h.controller.command('summon');
     assert.equal(h.audio.calls.at(-1), 'stop');
 
-    await until(() => h.seen.some((m) => m.type === 'tts.end'));
-    assert.ok(h.audio.played > 0, 'speech frames reached the speaker');
+    await until(() => ended(h) === 2);
+    assert.ok(h.audio.played > greetingBytes, 'the reply reached the speaker after the greeting');
     assert.equal(h.seen.find((m) => m.type === 'transcript.final')!.type, 'transcript.final');
     assert.equal(h.controller.display, 'idle');
     h.controller.dispose();
@@ -105,6 +113,7 @@ describe('Windows voice host against the demo server', () => {
     const h = host('good');
     await h.client.connect();
     h.controller.setConnected(true);
+    await afterGreeting(h);
     h.controller.command('summon');
     for (let i = 0; i < 5; i++) h.controller.onMic(new Uint8Array(960));
     h.controller.command('summon');

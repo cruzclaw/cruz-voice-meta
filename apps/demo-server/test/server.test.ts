@@ -12,7 +12,7 @@ let port: number;
 before(async () => {
   demo = createDemoServer({
     accounts: [
-      { token: 'token-on', tenantKey: 'on', features: { voiceEnabled: true } },
+      { token: 'token-on', tenantKey: 'on', features: { voiceEnabled: true }, displayName: 'Dana' },
       { token: 'token-off', tenantKey: 'off', features: { voiceEnabled: false } },
     ],
     providers: {
@@ -64,9 +64,13 @@ describe('demo server over a real WebSocket', () => {
 
     ws.send(JSON.stringify({ v: 1, type: 'session.start', audio }));
     await waitFor(() => messages.some((m) => m.type === 'session.ready'));
+    // The assistant speaks first, and addresses the person by the name on the server's own record.
+    await waitFor(() => messages.some((m) => m.type === 'tts.end'));
+    const greeting = messages.filter((m) => m.type === 'assistant.text.delta').map((m) => (m as { text: string }).text).join('');
+    assert.equal(greeting, "Hi Dana, I'm listening. How can I help?");
     ws.send(encodeAudioFrame({ kind: 'mic', seq: 0, pcm: new Uint8Array(640) }), { binary: true });
     ws.send(JSON.stringify({ v: 1, type: 'input.end' }));
-    await waitFor(() => messages.some((m) => m.type === 'tts.end'));
+    await waitFor(() => messages.filter((m) => m.type === 'tts.end').length === 2);
     assert.ok(speechFrames > 0);
 
     const approval = messages.find((m) => m.type === 'approval.requested');

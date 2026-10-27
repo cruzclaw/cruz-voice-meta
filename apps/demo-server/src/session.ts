@@ -31,6 +31,8 @@ export interface SessionOptions {
   onTaskReady?: (taskId: string) => void;
   /** Called with the real cause when a provider fails. The client only sees a generic message. */
   onProviderError?: (error: unknown) => void;
+  /** Spoken as soon as the session is ready, before the person says anything. */
+  greeting?: string;
   maxUtteranceSeconds?: number;
 }
 
@@ -128,6 +130,21 @@ export class VoiceSession {
     this.conversationId = message.conversationId ?? `conv-${this.opts.sessionId}`;
     this.guard.markReady();
     this.send({ type: 'session.ready', sessionId: this.opts.sessionId, audio: message.audio });
+    if (this.opts.greeting) this.greet(this.opts.greeting);
+  }
+
+  /** The assistant speaks first. An interrupt or the person's first utterance stops it like any reply. */
+  private greet(text: string): void {
+    const controller = new AbortController();
+    this.turn = controller;
+    const turnId = `turn-${++this.turnCount}`;
+    void this.guarded(async () => {
+      this.send({ type: 'assistant.text.delta', turnId, text });
+      this.send({ type: 'assistant.text.done', turnId });
+      await this.speak(text, turnId, controller.signal);
+    }, controller).then(() => {
+      if (this.turn === controller) this.turn = undefined;
+    });
   }
 
   private endInput(requestedId: string | undefined): void {

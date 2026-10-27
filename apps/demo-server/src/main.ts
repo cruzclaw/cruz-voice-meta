@@ -47,7 +47,7 @@ if (process.env.TTS !== 'tone') {
 
 /** Loopback only. */
 const demo = createDemoServer({
-  accounts: [{ token, tenantKey: 'demo', features: { voiceEnabled: true } }],
+  accounts: [{ token, tenantKey: 'demo', features: { voiceEnabled: true }, ...(process.env.DEMO_USER_NAME ? { displayName: process.env.DEMO_USER_NAME } : {}) }],
   providers: { transcriber, reasoner, synthesizer },
   killSwitch: process.env.VOICE_FEATURE_DISABLED === 'true',
   // Provider errors never contain the API key (the adapters build their own messages).

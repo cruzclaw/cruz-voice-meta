@@ -5,6 +5,7 @@ import { WebSocketServer, type RawData } from 'ws';
 import { LIMITS, parseVoiceFeatureConfig, type VoiceFeatureConfig } from '@cruzclaw/voice-core';
 import { MockEmployeeBackend } from '@cruzclaw/mock-employee';
 import type { Providers } from './ports.js';
+import { greetingFor } from './greeting.js';
 import { VoiceSession } from './session.js';
 
 export interface DemoAccount {
@@ -12,6 +13,8 @@ export interface DemoAccount {
   token: string;
   tenantKey: string;
   features: unknown;
+  /** How the assistant addresses this person. Kept on the server; a client cannot set it. */
+  displayName?: string;
 }
 
 export interface DemoServerOptions {
@@ -113,6 +116,7 @@ export function createDemoServer(options: DemoServerOptions): DemoServer {
         host: backend.hostFor(account.tenantKey),
         providers: options.providers,
         features,
+        greeting: greetingFor(account.displayName),
         onTaskReady: (taskId) => drive(account.tenantKey, taskId),
         ...(options.onProviderError ? { onProviderError: options.onProviderError } : {}),
         transport: {

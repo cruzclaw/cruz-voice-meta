@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { MockEmployeeBackend } from '@cruzclaw/mock-employee';
 import { encodeAudioFrame, type ServerMessage } from '@cruzclaw/voice-core';
 import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from '../src/mock-providers.js';
+import { greetingFor } from '../src/greeting.js';
 import { VoiceSession } from '../src/session.js';
 
 const audio = { encoding: 'pcm_s16le', sampleRate: 16000, channels: 1 } as const;
@@ -164,5 +165,56 @@ describe('VoiceSession provider failures', () => {
     assert.equal(error.code, 'PROVIDER_ERROR');
     assert.equal(error.message.includes('503'), false);
     assert.match((causes[0] as Error).message, /HTTP 503/);
+  });
+});
+
+describe('greeting', () => {
+  const build = (greeting: string | undefined) => {
+    const messages: ServerMessage[] = [];
+    let audioFrames = 0;
+    const session = new VoiceSession({
+      sessionId: 's3',
+      host: new MockEmployeeBackend().hostFor('t1'),
+      providers: { transcriber: new ScriptedTranscriber(['hello']), reasoner: new RuleReasoner(), synthesizer: new ToneSynthesizer() },
+      features: { voiceEnabled: true, wakePhraseConsent: false },
+      ...(greeting ? { greeting } : {}),
+      transport: { sendJson: (m) => messages.push(m), sendAudio: () => void audioFrames++, close: () => undefined },
+    });
+    return { session, messages, frames: () => audioFrames };
+  };
+  const until = async (done: () => boolean) => {
+    for (let i = 0; i < 500 && !done(); i++) await new Promise((r) => setImmediate(r));
+  };
+
+  it('speaks first, right after session.ready, and says nothing extra without a greeting', async () => {
+    const g = build('Hi Dana, I am listening.');
+    g.session.handleText(start);
+    await until(() => g.messages.some((m) => m.type === 'tts.end'));
+    assert.deepEqual(g.messages.map((m) => m.type), ['session.ready', 'assistant.text.delta', 'assistant.text.done', 'tts.start', 'tts.end']);
+    assert.ok(g.frames() > 0);
+    const none = build(undefined);
+    none.session.handleText(start);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.deepEqual(none.messages.map((m) => m.type), ['session.ready']);
+  });
+
+  it('is stopped by an interrupt like any reply', async () => {
+    const g = build('Hi Dana, I am listening. This greeting is deliberately long so it is still playing when interrupted.');
+    g.session.handleText(start);
+    await until(() => g.messages.some((m) => m.type === 'tts.start'));
+    g.session.handleText(JSON.stringify({ v: 1, type: 'interrupt', reason: 'barge_in' }));
+    await until(() => g.messages.some((m) => m.type === 'tts.cancelled' || m.type === 'tts.end'));
+    assert.ok(g.messages.some((m) => m.type === 'tts.cancelled'));
+  });
+
+  it('builds the line from a cleaned name, or generically when there is none', () => {
+    assert.equal(greetingFor('Dana'), "Hi Dana, I'm listening. How can I help?");
+    assert.equal(greetingFor("  Mary-Ann   O'Neil "), "Hi Mary-Ann O'Neil, I'm listening. How can I help?");
+    assert.equal(greetingFor('José'), "Hi José, I'm listening. How can I help?");
+    assert.equal(greetingFor(undefined), "Hi, I'm listening. How can I help?");
+    assert.equal(greetingFor('   '), "Hi, I'm listening. How can I help?");
+    // Markup, control characters and ignore-the-rules text cannot ride into spoken output.
+    assert.equal(greetingFor('<b>Dana</b>' + String.fromCharCode(10, 0)), "Hi bDanab, I'm listening. How can I help?");
+    assert.ok(greetingFor('x'.repeat(200)).length < 80);
   });
 });
