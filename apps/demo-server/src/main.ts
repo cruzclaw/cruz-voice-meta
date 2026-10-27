@@ -1,10 +1,16 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { MetaReasoner } from './meta-reasoner.js';
-import { MetaTranscriber } from './meta-transcriber.js';
-import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from './mock-providers.js';
-import type { Reasoner, Synthesizer, Transcriber } from './ports.js';
+import {
+  MetaReasoner,
+  MetaTranscriber,
+  RuleReasoner,
+  ScriptedTranscriber,
+  ToneSynthesizer,
+  type Reasoner,
+  type Synthesizer,
+  type Transcriber,
+} from '@cruzclaw/voice-server';
 import { createDemoServer } from './server.js';
 
 // Optional local secrets file next to this app. It is git-ignored; never commit it.

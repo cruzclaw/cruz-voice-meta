@@ -26,6 +26,9 @@
       "@cruzclaw/windows-bridge": [
         "packages/windows-bridge/src/index.ts"
       ],
+      "@cruzclaw/voice-server": [
+        "packages/voice-server/src/index.ts"
+      ],
       "@cruzclaw/wake-word": [
         "packages/wake-word/src/index.ts"
       ],

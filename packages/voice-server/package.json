@@ -1,0 +1,30 @@
+{
+  "name": "@cruzclaw/voice-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The voice session: protocol handling, turn flow, the speech and reasoning ports, and the Meta speech-to-text and Muse Spark adapters. Embed it behind any authenticated WebSocket and any employee host.",
+  "license": "Apache-2.0",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  },
+  "dependencies": {
+    "@cruzclaw/voice-core": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@cruzclaw/mock-employee": "*",
+    "@types/ws": "^8.5.0"
+  }
+}

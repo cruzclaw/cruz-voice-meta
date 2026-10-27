@@ -4,9 +4,7 @@ import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData } from 'ws';
 import { LIMITS, parseVoiceFeatureConfig, type VoiceFeatureConfig } from '@cruzclaw/voice-core';
 import { MockEmployeeBackend } from '@cruzclaw/mock-employee';
-import type { Providers } from './ports.js';
-import { greetingFor } from './greeting.js';
-import { VoiceSession } from './session.js';
+import { greetingFor, VoiceSession, type Providers } from '@cruzclaw/voice-server';
 
 export interface DemoAccount {
   /** Bearer token the client presents. Maps to exactly one tenant. */

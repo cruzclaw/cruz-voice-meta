@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import WebSocket from 'ws';
 import { decodeAudioFrame, encodeAudioFrame, type ServerMessage } from '@cruzclaw/voice-core';
-import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from '../src/mock-providers.js';
+import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from '@cruzclaw/voice-server';
 import { createDemoServer, type DemoServer } from '../src/server.js';
 
 const audio = { encoding: 'pcm_s16le', sampleRate: 16000, channels: 1 };

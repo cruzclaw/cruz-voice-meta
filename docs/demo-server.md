@@ -1,5 +1,7 @@
 # Demo server
 
+> The session logic, the speech and reasoning ports and the Meta adapters now live in `packages/voice-server` (`@cruzclaw/voice-server`, built for ESM and CommonJS). This app is the thin shell around it: the WebSocket server, the demo accounts and the entry point. A host that already has its own authenticated WebSocket, such as a production backend, embeds `VoiceSession` from that package instead.
+
 `apps/demo-server` speaks [protocol v1](protocol.md) over a WebSocket with mock providers and the synthetic employee from `examples/mock-employee`. It needs no credentials and no private code.
 
 ```

@@ -12,6 +12,7 @@
   "dependencies": {
     "@cruzclaw/mock-employee": "*",
     "@cruzclaw/voice-core": "*",
+    "@cruzclaw/voice-server": "*",
     "ws": "^8.18.0"
   },
   "devDependencies": {
