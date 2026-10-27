@@ -35,9 +35,9 @@ jobs:
       - run: npm ci
       # The gate covers every package that ships or is imported by the private repo.
       - run: npm audit --audit-level=high -w @cruzclaw/voice-core -w @cruzclaw/voice-server -w @cruzclaw/windows-bridge -w @cruzclaw/demo-server -w @cruzclaw/mock-employee -w @cruzclaw/wake-word
-      # The Windows host bundles Kokoro, so its tree carries the same unfixed sharp advisories. It is gated by a
-      # script that accepts only that named chain and fails on any other high or critical advisory.
-      - name: Audit the Windows host, accepting only the known Kokoro chain
+      # The Windows host bundles Kokoro, so its tree carries three unfixed sharp advisories. A script accepts exactly
+      # those advisory ids and fails on anything else at high or critical. Evidence: docs/audit-exceptions.md.
+      - name: Audit the Windows host, accepting only three named advisories
         run: node scripts/audit-host.mjs
       # Kokoro's dependency tree carries unfixed advisories in sharp (image decoding),
       # which speech synthesis never calls. Reported, not gated. Re-check when sharp is fixed.
