@@ -64,7 +64,11 @@ export type UiAction =
   /** The shell calls this when nothing was recognised and the server stayed silent. */
   | { type: 'no_response' }
   /** The person pressed to talk but said nothing, so listening was dropped. */
-  | { type: 'listen_cancel' };
+  | { type: 'listen_cancel' }
+  /** The person cut the assistant off, while it was thinking or speaking. */
+  | { type: 'interrupted' }
+  /** A session could not be opened. */
+  | { type: 'session_failed'; message: string };
 
 export type PanelEvent =
   | { kind: 'server'; message: ServerMessage }
@@ -184,6 +188,10 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
       return { ...s, visible: false };
     case 'settle':
       return s.phase === 'thinking' && s.replyDone ? { ...s, phase: 'idle', replyDone: false } : s;
+    case 'interrupted':
+      return s.phase === 'thinking' || s.phase === 'speaking' ? { ...s, phase: 'idle', replyDone: false } : s;
+    case 'session_failed':
+      return { ...s, phase: 'idle', lastError: { code: 'SESSION', message: a.message.slice(0, 200), retryable: true } };
     case 'listen_cancel':
       return s.phase === 'listening'
         ? { ...s, phase: 'idle', lastError: { code: 'NO_SPEECH', message: 'I did not hear anything. Try again.', retryable: true } }
@@ -237,7 +245,8 @@ export function effectsFor(s: PanelState, command: Command): Effect[] {
     case 'summon': {
       // Summoned by the person, so taking focus is expected.
       const effects: Effect[] = [{ type: 'show', focus: true }];
-      if (s.phase === 'speaking') effects.push(msg({ type: 'interrupt', reason: 'barge_in' }));
+      // Cutting in works while it is thinking as well as while it speaks.
+      if (s.phase === 'speaking' || s.phase === 'thinking') effects.push(msg({ type: 'interrupt', reason: 'barge_in' }));
       if (s.phase === 'listening') {
         effects.push({ type: 'capture', on: false }, msg({ type: 'input.end' }));
       } else if (!s.micMuted && s.connected) {

@@ -167,6 +167,25 @@ describe('controls', () => {
     assert.deepEqual(e.at(-1), { type: 'capture', on: true });
   });
 
+  it('summon while thinking also cuts in, then listens', () => {
+    const s = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' })], ready());
+    assert.equal(displayState(s), 'thinking');
+    const e = effectsFor(s, 'summon');
+    assert.ok(e.some((x) => x.type === 'send' && x.message.type === 'interrupt'));
+    assert.deepEqual(e.at(-1), { type: 'capture', on: true });
+  });
+
+  it('an interrupt returns thinking or speaking to idle, and a failed session shows its message', () => {
+    const thinking = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' }), ui({ type: 'interrupted' })], ready());
+    assert.equal(displayState(thinking), 'idle');
+    const speaking = run([server({ type: 'tts.start', ttsId: 't', turnId: 'x', audio }), ui({ type: 'interrupted' })], ready());
+    assert.equal(displayState(speaking), 'idle');
+    const listening = run([ui({ type: 'listen_start' }), ui({ type: 'interrupted' })], ready());
+    assert.equal(displayState(listening), 'listening');
+    const failed = run([ui({ type: 'session_failed', message: 'refused' })], ready());
+    assert.equal(failed.lastError?.message, 'refused');
+  });
+
   it('summon while listening ends the input; while disconnected or muted it only shows', () => {
     const listening = run([ui({ type: 'listen_start' })], ready());
     assert.deepEqual(sent(listening, 'summon'), ['input.end']);

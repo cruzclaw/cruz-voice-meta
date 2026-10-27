@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -74,15 +75,22 @@ const audio: AudioDevice = {
   stopCapture: () => audioWindow?.webContents.send('capture', false),
   play: (pcm) => audioWindow?.webContents.send('play', pcm),
   stopPlayback: () => audioWindow?.webContents.send('stop-playback'),
+  chime: (kind) => audioWindow?.webContents.send('chime', kind),
 };
+
+/** One id for this launch, so the assistant keeps its memory of the conversation across greetings. */
+const CONVERSATION_ID = `host-${randomUUID()}`;
 
 const controller = new HostController(
   {
     send: (message) => client?.send(message),
     sendMic: (pcm) => client?.sendMic(pcm),
+    startSession: (fresh) => startSession(fresh),
   },
   audio,
-  (state, display) => {
+  {
+    ...(AUTO_END ? { endpoint: new EndpointDetector({ endSilenceMs: END_SILENCE_MS }) } : {}),
+    onChange: (state, display) => {
     tray?.setImage(dot(display));
     tray?.setToolTip(`CruzClaw voice: ${STATE_TEXT[display]}`);
     if (state.lastError && state.lastError !== lastErrorShown) log(`error ${state.lastError.code}: ${state.lastError.message}`);
@@ -92,9 +100,8 @@ const controller = new HostController(
     if (wasListening && !listening) saveUtterance();
     if (!wasListening && listening) utterance = [];
     wasListening = listening;
+    },
   },
-  undefined,
-  AUTO_END ? new EndpointDetector({ endSilenceMs: END_SILENCE_MS }) : undefined,
 );
 
 let lastErrorShown: PanelState['lastError'];
@@ -146,44 +153,73 @@ function log(line: string): void {
   console.log(`[voice] ${line}`);
 }
 
-async function connectLoop(): Promise<void> {
-  let wait = 2000;
-  while (!quitting) {
-    const next = new VoiceClient(URL, TOKEN, {
-      onMessage: (m) => {
-        controller.onServer(m);
-        if (m.type === 'transcript.final') log(`you said: ${m.text}`);
-        if (m.type === 'assistant.text.done') log(`reply: ${controller.state.reply}`);
-        if (m.type === 'approval.requested') log(`needs approval: ${m.summary}`);
-        if (controller.display !== lastDisplay) log(`state: ${(lastDisplay = controller.display)}`);
-      },
-      onSpeech: (pcm) => controller.onSpeech(pcm),
-      onClose: (reason) => {
-        log(reason);
-        controller.setConnected(false);
-        reconnected.resolve();
-      },
-    });
-    const reconnected = (() => {
-      let resolve!: () => void;
-      const promise = new Promise<void>((r) => (resolve = r));
-      return { promise, resolve };
-    })();
-    try {
-      await next.connect();
-      client = next;
-      controller.setConnected(true);
-      log(`connected to ${URL}. Press ${SHORTCUT} to talk, press it again when you finish.`);
-      wait = 2000;
-      await reconnected.promise;
-    } catch (e) {
-      log(`${(e as Error).message}. Retrying in ${Math.round(wait / 1000)} s.`);
-    }
-    client = undefined;
+/** Each connection gets a number, so a connection that was replaced cannot speak for the current one. */
+let generation = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+let reconnectWait = 2000;
+
+function newClient(): VoiceClient {
+  const mine = ++generation;
+  return new VoiceClient(URL, TOKEN, {
+    onMessage: (m) => {
+      if (mine !== generation) return;
+      controller.onServer(m);
+      if (m.type === 'transcript.final') log(`you said: ${m.text}`);
+      if (m.type === 'assistant.text.done') log(`reply: ${controller.state.reply}`);
+      if (m.type === 'approval.requested') log(`needs approval: ${m.summary}`);
+      if (controller.display !== lastDisplay) log(`state: ${(lastDisplay = controller.display)}`);
+    },
+    onSpeech: (pcm) => {
+      if (mine === generation) controller.onSpeech(pcm);
+    },
+    onClose: (reason) => {
+      if (mine !== generation) return;
+      log(reason);
+      client = undefined;
+      controller.setConnected(false);
+      scheduleReconnect();
+    },
+  });
+}
+
+/** Opens the connection, which checks the token, without starting a session. Retries with a growing wait. */
+async function connectOnce(): Promise<void> {
+  if (quitting || client) return;
+  const next = newClient();
+  try {
+    await next.openConnection();
+  } catch (e) {
     if (quitting) return;
-    await new Promise((r) => setTimeout(r, wait));
-    wait = Math.min(wait * 2, 15000);
+    log(`${(e as Error).message}. Retrying in ${Math.round(reconnectWait / 1000)} s.`);
+    scheduleReconnect();
+    return;
   }
+  client = next;
+  reconnectWait = 2000;
+  controller.setConnected(true);
+  log(`connected to ${URL}. Press ${SHORTCUT} to talk.`);
+}
+
+function scheduleReconnect(): void {
+  if (quitting || reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = undefined;
+    void connectOnce();
+  }, reconnectWait);
+  reconnectWait = Math.min(reconnectWait * 2, 15000);
+}
+
+/** Starts a voice session. A fresh one replaces the current connection, because a connection carries one session. */
+async function startSession(fresh: boolean): Promise<void> {
+  if (fresh && client) {
+    const old = client;
+    client = undefined;
+    generation++; // Silences the old connection's close and messages.
+    old.close();
+    await connectOnce();
+  }
+  if (!client) throw new Error('Not connected to the voice server');
+  await client.startSession(CONVERSATION_ID);
 }
 
 function createAudioWindow(): BrowserWindow {
@@ -301,11 +337,12 @@ if (!app.requestSingleInstanceLock()) {
     // In debug mode, play a test tone once the audio window is ready.
     if (DUMP) audioWindow.webContents.once('did-finish-load', () => setTimeout(() => audioWindow?.webContents.send('beep'), 1000));
 
-    void connectLoop();
+    void connectOnce();
   });
   app.on('before-quit', () => {
     quitting = true;
     controller.dispose();
+    clearTimeout(reconnectTimer);
     client?.close();
     globalShortcut.unregisterAll();
   });

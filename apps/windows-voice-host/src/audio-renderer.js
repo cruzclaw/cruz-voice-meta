@@ -2,21 +2,61 @@
 const RATE = 24000;
 const context = new AudioContext({ sampleRate: RATE });
 
+// Short generated tones, so there are no sound files to ship. Notes are [Hz, seconds].
+const CHIMES = {
+  listening: [[660, 0.07], [880, 0.09]], // rising: go ahead
+  thinking: [[520, 0.06], [390, 0.12]], // falling: heard you, working on it
+  cancelled: [[500, 0.07], [360, 0.07]], // quick and low: nothing heard
+};
+let chimeEndsAt = 0;
+
+function chime(kind) {
+  const notes = CHIMES[kind];
+  if (!notes) return;
+  void context.resume();
+  let at = context.currentTime + 0.01;
+  for (const [hz, seconds] of notes) {
+    const osc = context.createOscillator();
+    const gain = context.createGain();
+    osc.frequency.value = hz;
+    // A quick fade in and out keeps the tone from clicking.
+    gain.gain.setValueAtTime(0, at);
+    gain.gain.linearRampToValueAtTime(0.14, at + 0.012);
+    gain.gain.linearRampToValueAtTime(0, at + seconds);
+    osc.connect(gain).connect(context.destination);
+    osc.start(at);
+    osc.stop(at + seconds + 0.02);
+    at += seconds;
+  }
+  chimeEndsAt = at;
+}
+
 let stream;
 let source;
 let node;
 let starting = false;
+// Set by the main process. If listening was cancelled while the microphone was still opening, do not open it.
+let wanted = false;
 
 async function startCapture() {
+  wanted = true;
   if (stream || starting) return;
   starting = true;
   try {
     await context.resume();
+    // Do not open the microphone until the chime has finished, or it would record the chime.
+    const wait = (chimeEndsAt - context.currentTime) * 1000 + 60;
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     await context.audioWorklet.addModule('audio-worklet.js');
+    if (!wanted) return;
     stream = await navigator.mediaDevices.getUserMedia({
       // Echo cancellation keeps the assistant's own voice out of the microphone.
       audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
+    if (!wanted) {
+      stopCapture();
+      return;
+    }
     source = context.createMediaStreamSource(stream);
     node = new AudioWorkletNode(context, 'capture-processor');
     node.port.onmessage = (event) => {
@@ -37,6 +77,7 @@ async function startCapture() {
 }
 
 function stopCapture() {
+  wanted = false;
   if (node) node.port.onmessage = null;
   if (source) source.disconnect();
   if (node) node.disconnect();
@@ -113,6 +154,7 @@ function beep() {
 }
 
 window.hostAudio.onBeep(beep);
+window.hostAudio.onChime(chime);
 window.hostAudio.onCapture((on) => (on ? startCapture() : stopCapture()));
 window.hostAudio.onPlay(play);
 window.hostAudio.onStopPlayback(stopPlayback);

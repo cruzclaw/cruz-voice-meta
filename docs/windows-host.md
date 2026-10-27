@@ -7,7 +7,10 @@
 1. Start the demo server (`apps/demo-server`, see `docs/demo-server.md`). It prints a bearer token.
 2. From `apps/windows-voice-host`: set `VOICE_TOKEN` to that token and run `npm start`.
    `VOICE_URL` (default `ws://127.0.0.1:8787`) and `VOICE_SHORTCUT` (default `Ctrl+Shift+Space`) are optional.
-3. Press the shortcut, speak, press it again. Press it while the assistant is speaking to interrupt.
+3. Press the shortcut. The first press (and the first after 15 minutes of quiet) opens a session and the assistant greets you by name; when the greeting ends it listens on its own. Later presses chime and listen straight away.
+4. Speak, then stop. About 0.9 s of quiet ends your turn and a second chime means it is thinking. Press the shortcut at any time, while it is thinking or speaking, to cut in: it stops and listens.
+
+Chimes are generated tones: rising when it starts listening, falling when it starts thinking, short and low when nothing was heard.
 
 Electron's binary is not fetched by npm 11 (install scripts are skipped). If `npm start` says Electron is missing, run `node node_modules/electron/install.js` once.
 
@@ -15,7 +18,7 @@ Electron's binary is not fetched by npm 11 (install scripts are skipped). If `np
 
 | Part | Where | Job |
 | --- | --- | --- |
-| `VoiceClient` | `src/client.ts` | WebSocket in the main process, because browsers cannot set the Authorization header |
+| `VoiceClient` | `src/client.ts` | WebSocket in the main process, because browsers cannot set the Authorization header. Opening the connection (token check) is separate from starting a session, because the greeting plays when a session starts |
 | `HostController` | `src/controller.ts` | Shortcut presses and server messages into state and actions, using `@cruzclaw/windows-bridge` |
 | Audio window | `src/audio-*.js`, `preload.cjs` | Hidden, sandboxed page that owns the microphone (24 kHz, 40 ms frames, echo cancellation) and the speaker |
 | Shell | `src/main.ts` | Tray, global shortcut, microphone permission for the audio window only |
