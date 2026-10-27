@@ -111,6 +111,14 @@ describe('panel state', () => {
     assert.equal(displayState(run([ui({ type: 'no_response' })], heard)), 'thinking');
   });
 
+  it('starts the screen fresh on a new session, so a greeting does not join the previous reply', () => {
+    const old = run([server({ type: 'transcript.final', utteranceId: 'u', text: 'hi' }), server({ type: 'assistant.text.delta', turnId: 't', text: 'Earlier reply.' })], ready());
+    assert.equal(old.reply, 'Earlier reply.');
+    const fresh = run([{ kind: 'connection', connected: true }, server({ type: 'session.ready', sessionId: 's', audio }), server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'Hi Dana.' })], old);
+    assert.equal(fresh.reply, 'Hi Dana.');
+    assert.equal(fresh.transcript, '');
+  });
+
   it('keeps mute local and stops listening when muted', () => {
     let s = run([ui({ type: 'listen_start' })], ready());
     s = run([ui({ type: 'toggle_mute' })], s);

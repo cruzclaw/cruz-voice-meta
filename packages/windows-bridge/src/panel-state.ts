@@ -118,7 +118,8 @@ function applyTaskEvent(tasks: TaskView[], event: ProgressEvent): TaskView[] {
 function reduceServer(s: PanelState, m: ServerMessage): PanelState {
   switch (m.type) {
     case 'session.ready':
-      return { ...s, connected: true, sessionActive: true, lastError: undefined };
+      // A new session starts a fresh conversation on screen, so its greeting does not join the last reply.
+      return { ...s, connected: true, sessionActive: true, lastError: undefined, transcript: '', reply: '' };
     case 'session.closed':
       return { ...s, sessionActive: false, phase: 'idle', replyDone: false };
     case 'transcript.partial':
