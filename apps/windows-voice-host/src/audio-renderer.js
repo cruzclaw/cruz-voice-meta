@@ -204,3 +204,6 @@ window.hostAudio.onWake((on) => {
 });
 window.hostAudio.onPlay(play);
 window.hostAudio.onStopPlayback(stopPlayback);
+
+// Everything above is in place, so the main process can now send instructions. Anything it sent earlier was lost.
+window.hostAudio.ready();

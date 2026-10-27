@@ -361,6 +361,10 @@ if (!app.requestSingleInstanceLock()) {
       speakerBusy = false;
       controller.onPlaybackDrained();
     });
+    ipcMain.on('audio-ready', (event) => {
+      // The audio window loads after the connection may already be up, so tell it what to do now.
+      if (event.sender === audioWindow?.webContents && controller.wakeListening) audioWindow.webContents.send('wake-mic', true);
+    });
     ipcMain.on('audio-info', (event, message: unknown) => {
       if (event.sender !== audioWindow?.webContents) return;
       const text = String(message).slice(0, 200);
