@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Local text-to-speech with Kokoro-82M. Isolated in its own package because its dependency tree carries unfixed image-library advisories that speech never reaches.",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

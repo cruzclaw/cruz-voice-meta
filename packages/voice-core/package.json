@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Versioned VoiceEmployeeHost contract, DTOs and conformance suite.",
+  "license": "Apache-2.0",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",

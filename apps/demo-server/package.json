@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Standalone voice session server with mock speech and reasoning providers and a synthetic employee. Runs with no credentials.",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {

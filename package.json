@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Public voice modules for CruzClaw built on Meta models, with a standalone synthetic demo.",
+  "license": "Apache-2.0",
   "workspaces": [
     "packages/*",
     "examples/*",
