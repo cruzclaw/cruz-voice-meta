@@ -22,6 +22,9 @@
       ],
       "@cruzclaw/mock-employee": [
         "examples/mock-employee/src/index.ts"
+      ],
+      "@cruzclaw/windows-bridge": [
+        "packages/windows-bridge/src/index.ts"
       ]
     }
   },

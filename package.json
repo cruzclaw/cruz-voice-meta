@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test packages/voice-core/test/*.test.ts examples/mock-employee/test/*.test.ts apps/demo-server/test/*.test.ts"
+    "test": "tsx --test packages/voice-core/test/*.test.ts examples/mock-employee/test/*.test.ts apps/demo-server/test/*.test.ts packages/windows-bridge/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
