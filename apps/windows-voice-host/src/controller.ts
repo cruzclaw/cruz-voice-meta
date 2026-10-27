@@ -27,6 +27,8 @@ export interface Link {
 
 /** After the reply text ends with no speech following, the state settles back to idle. */
 const SETTLE_MS = 2000;
+/** If nothing comes back after the person stops talking, stop showing "thinking". */
+const NO_RESPONSE_MS = 15000;
 /** Stay under the server's 60 s per-utterance cap. */
 const MAX_UTTERANCE_MS = 55000;
 
@@ -38,11 +40,13 @@ export class HostController {
   state: PanelState = initialPanelState();
   private settle: ReturnType<typeof setTimeout> | undefined;
   private cap: ReturnType<typeof setTimeout> | undefined;
+  private waiting: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly link: Link,
     private readonly audio: AudioDevice,
     private readonly onChange: (state: PanelState, display: DisplayState) => void = () => undefined,
+    private readonly noResponseMs = NO_RESPONSE_MS,
   ) {}
 
   get display(): DisplayState {
@@ -56,6 +60,7 @@ export class HostController {
 
   onServer(message: ServerMessage): void {
     this.dispatch({ kind: 'server', message });
+    if (message.type === 'transcript.final' || message.type === 'error' || message.type === 'session.closed') clearTimeout(this.waiting);
     if (message.type === 'tts.cancelled') this.audio.stopPlayback();
     if (message.type === 'assistant.text.done') {
       clearTimeout(this.settle);
@@ -94,6 +99,8 @@ export class HostController {
           clearTimeout(this.cap);
           this.audio.stopCapture();
           this.dispatch({ kind: 'ui', action: { type: 'listen_end' } });
+          clearTimeout(this.waiting);
+          this.waiting = setTimeout(() => this.dispatch({ kind: 'ui', action: { type: 'no_response' } }), this.noResponseMs);
         }
         return;
       case 'send':
@@ -109,6 +116,7 @@ export class HostController {
   private stopAll(): void {
     clearTimeout(this.cap);
     clearTimeout(this.settle);
+    clearTimeout(this.waiting);
     this.audio.stopCapture();
     this.audio.stopPlayback();
   }

@@ -139,3 +139,30 @@ describe('VoiceSession', () => {
     assert.ok(t.messages.some((m) => m.type === 'error'));
   });
 });
+
+describe('VoiceSession provider failures', () => {
+  it('tells the client only a generic message and gives the operator the real cause', async () => {
+    const causes: unknown[] = [];
+    const messages: ServerMessage[] = [];
+    const session = new VoiceSession({
+      sessionId: 's2',
+      host: new MockEmployeeBackend().hostFor('t1'),
+      providers: {
+        transcriber: { transcribe: async () => { throw new Error('Meta speech-to-text failed: HTTP 503'); } },
+        reasoner: new RuleReasoner(),
+        synthesizer: new ToneSynthesizer(),
+      },
+      features: { voiceEnabled: true, wakePhraseConsent: false },
+      onProviderError: (e) => causes.push(e),
+      transport: { sendJson: (m) => messages.push(m), sendAudio: () => undefined, close: () => undefined },
+    });
+    session.handleText(start);
+    session.handleBinary(micFrame);
+    session.handleText(JSON.stringify({ v: 1, type: 'input.end' }));
+    for (let i = 0; i < 500 && !messages.some((m) => m.type === 'error'); i++) await new Promise((r) => setImmediate(r));
+    const error = messages.find((m) => m.type === 'error') as Extract<ServerMessage, { type: 'error' }>;
+    assert.equal(error.code, 'PROVIDER_ERROR');
+    assert.equal(error.message.includes('503'), false);
+    assert.match((causes[0] as Error).message, /HTTP 503/);
+  });
+});

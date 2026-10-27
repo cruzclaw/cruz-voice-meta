@@ -24,6 +24,8 @@ export interface DemoServerOptions {
   killSwitch?: boolean;
   /** How often the demo worker advances tasks, in ms. */
   workerIntervalMs?: number;
+  /** Receives the real cause of a provider failure, for the operator's log. */
+  onProviderError?: (error: unknown) => void;
 }
 
 export interface DemoServer {
@@ -112,6 +114,7 @@ export function createDemoServer(options: DemoServerOptions): DemoServer {
         providers: options.providers,
         features,
         onTaskReady: (taskId) => drive(account.tenantKey, taskId),
+        ...(options.onProviderError ? { onProviderError: options.onProviderError } : {}),
         transport: {
           sendJson: (message) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(message)),
           sendAudio: (frame) => ws.readyState === ws.OPEN && ws.send(frame, { binary: true }),

@@ -93,6 +93,24 @@ describe('panel state', () => {
     assert.equal(displayState(stillThinking), 'thinking');
   });
 
+  it('leaves thinking and speaking when the server reports an error', () => {
+    const failed = (phaseEvents: PanelEvent[]) =>
+      run([...phaseEvents, server({ type: 'error', code: 'PROVIDER_ERROR', message: 'x', retryable: true })], ready());
+    assert.equal(displayState(failed([ui({ type: 'listen_start' }), ui({ type: 'listen_end' })])), 'idle');
+    assert.equal(displayState(failed([server({ type: 'tts.start', ttsId: 't', turnId: 'u', audio })])), 'idle');
+    assert.equal(failed([]).lastError?.code, 'PROVIDER_ERROR');
+  });
+
+  it('gives up waiting when nothing was recognised, but not while real speech is being answered', () => {
+    const silent = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' })], ready());
+    assert.equal(displayState(silent), 'thinking');
+    const gaveUp = run([ui({ type: 'no_response' })], silent);
+    assert.equal(displayState(gaveUp), 'idle');
+    assert.equal(gaveUp.lastError?.code, 'NO_SPEECH');
+    const heard = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' }), server({ type: 'transcript.final', utteranceId: 'u', text: 'hello' })], ready());
+    assert.equal(displayState(run([ui({ type: 'no_response' })], heard)), 'thinking');
+  });
+
   it('keeps mute local and stops listening when muted', () => {
     let s = run([ui({ type: 'listen_start' })], ready());
     s = run([ui({ type: 'toggle_mute' })], s);

@@ -50,6 +50,8 @@ const demo = createDemoServer({
   accounts: [{ token, tenantKey: 'demo', features: { voiceEnabled: true } }],
   providers: { transcriber, reasoner, synthesizer },
   killSwitch: process.env.VOICE_FEATURE_DISABLED === 'true',
+  // Provider errors never contain the API key (the adapters build their own messages).
+  onProviderError: (e) => console.error(`provider error: ${e instanceof Error ? e.message : 'unknown'}`),
 });
 
 const port = await demo.listen(Number(process.env.PORT ?? 8787));

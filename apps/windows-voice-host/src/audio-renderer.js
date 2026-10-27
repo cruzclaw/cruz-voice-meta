@@ -19,7 +19,14 @@ async function startCapture() {
     });
     source = context.createMediaStreamSource(stream);
     node = new AudioWorkletNode(context, 'capture-processor');
-    node.port.onmessage = (event) => window.hostAudio.sendMic(event.data);
+    node.port.onmessage = (event) => {
+      window.hostAudio.sendMic(event.data);
+      const samples = new Int16Array(event.data);
+      let sum = 0;
+      for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+      window.hostAudio.sendLevel(Math.sqrt(sum / samples.length) / 32768);
+    };
+    window.hostAudio.info(`microphone open at ${context.sampleRate} Hz, audio ${context.state}`);
     source.connect(node);
   } catch (e) {
     window.hostAudio.reportError(e && e.message ? e.message : e);
@@ -37,10 +44,14 @@ function stopCapture() {
   stream = source = node = undefined;
 }
 
+window.hostAudio.info(`audio ready: ${context.state} at ${context.sampleRate} Hz`);
 let playAt = 0;
 const playing = new Set();
 
+let playedSamples = 0;
+
 function play(pcm) {
+  if (context.state !== 'running') void context.resume();
   const bytes = pcm instanceof Uint8Array ? pcm : new Uint8Array(pcm);
   const samples = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 1);
   if (!samples.length) return;
@@ -55,6 +66,8 @@ function play(pcm) {
   node.start(playAt);
   playAt += buffer.duration;
   playing.add(node);
+  if (playedSamples === 0) window.hostAudio.info(`speaker: first chunk, audio ${context.state} at ${context.sampleRate} Hz`);
+  playedSamples += samples.length;
   node.onended = () => playing.delete(node);
 }
 
@@ -69,7 +82,17 @@ function stopPlayback() {
   }
   playing.clear();
   playAt = 0;
+  if (playedSamples) window.hostAudio.info(`speaker: ${(playedSamples / RATE).toFixed(1)} s of speech scheduled`);
+  playedSamples = 0;
 }
+
+// Speech ends on its own when the queue drains, so report once the last chunk finishes.
+setInterval(() => {
+  if (playedSamples && playing.size === 0) {
+    window.hostAudio.info(`speaker: ${(playedSamples / RATE).toFixed(1)} s of speech played`);
+    playedSamples = 0;
+  }
+}, 500);
 
 window.hostAudio.onCapture((on) => (on ? startCapture() : stopCapture()));
 window.hostAudio.onPlay(play);

@@ -115,6 +115,28 @@ describe('Windows voice host against the demo server', () => {
     h.client.close();
   });
 
+  it('stops showing "thinking" when the server never answers a silent utterance', async () => {
+    const c = new HostController({ send: () => undefined, sendMic: () => undefined }, new FakeAudio(), () => undefined, 30);
+    c.setConnected(true);
+    c.command('summon');
+    c.command('summon');
+    assert.equal(c.display, 'thinking');
+    await until(() => c.display === 'idle', 1000);
+    assert.equal(c.state.lastError?.code, 'NO_SPEECH');
+    c.dispose();
+  });
+
+  it('does not give up on an answer that is taking a while once speech was recognised', async () => {
+    const c = new HostController({ send: () => undefined, sendMic: () => undefined }, new FakeAudio(), () => undefined, 30);
+    c.setConnected(true);
+    c.command('summon');
+    c.command('summon');
+    c.onServer({ v: 1, seq: 1, type: 'transcript.final', utteranceId: 'u', text: 'hello' });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(c.display, 'thinking');
+    c.dispose();
+  });
+
   it('reports a wrong token without leaking it', async () => {
     const h = host('wrong-token-value');
     await assert.rejects(h.client.connect(), (e: Error) => {

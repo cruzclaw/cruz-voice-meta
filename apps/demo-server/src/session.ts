@@ -29,6 +29,8 @@ export interface SessionOptions {
   features: VoiceFeatureConfig;
   /** Called once a task, and its approval if any, has been fully registered. */
   onTaskReady?: (taskId: string) => void;
+  /** Called with the real cause when a provider fails. The client only sees a generic message. */
+  onProviderError?: (error: unknown) => void;
   maxUtteranceSeconds?: number;
 }
 
@@ -234,6 +236,7 @@ export class VoiceSession {
     } catch (e) {
       if (controller?.signal.aborted || this.closed) return;
       if (e instanceof HostError) return this.error('INTERNAL', `${e.code}: ${e.message}`, false);
+      this.opts.onProviderError?.(e);
       this.error('PROVIDER_ERROR', 'a speech or reasoning provider failed', true);
     }
   }

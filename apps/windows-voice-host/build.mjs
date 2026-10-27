@@ -12,6 +12,6 @@ await build({
   external: ['electron'],
   logLevel: 'info',
 });
-for (const file of ['preload.cjs', 'audio.html', 'audio-renderer.js', 'audio-worklet.js']) {
+for (const file of ['preload.cjs', 'audio.html', 'audio-renderer.js', 'audio-worklet.js', 'panel-preload.cjs', 'panel.html', 'panel.css', 'panel.js']) {
   copyFileSync(`src/${file}`, `dist/${file}`);
 }

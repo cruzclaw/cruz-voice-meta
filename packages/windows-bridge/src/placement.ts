@@ -27,7 +27,7 @@ export function pickDisplay(displays: DisplayInfo[], cursor: { x: number; y: num
 }
 
 /** Bottom-right of the work area, clamped so a small display never pushes the panel off screen. */
-export function defaultBounds(display: DisplayInfo, size = PANEL_SIZE): Rect {
+export function defaultBounds(display: DisplayInfo, size: { width: number; height: number } = PANEL_SIZE): Rect {
   const w = Math.min(size.width, display.workArea.width);
   const h = Math.min(size.height, display.workArea.height);
   return {
@@ -46,7 +46,7 @@ export function placePanel(
   displays: DisplayInfo[],
   cursor: { x: number; y: number },
   saved?: Rect,
-  size = PANEL_SIZE,
+  size: { width: number; height: number } = PANEL_SIZE,
 ): Rect | undefined {
   if (saved && displays.some((d) => fits(d.workArea, saved))) return saved;
   const display = pickDisplay(displays, cursor);

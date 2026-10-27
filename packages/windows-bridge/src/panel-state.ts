@@ -60,7 +60,9 @@ export type UiAction =
   | { type: 'show' }
   | { type: 'hide' }
   /** The shell calls this a moment after the reply text ends if no speech began. */
-  | { type: 'settle' };
+  | { type: 'settle' }
+  /** The shell calls this when nothing was recognised and the server stayed silent. */
+  | { type: 'no_response' };
 
 export type PanelEvent =
   | { kind: 'server'; message: ServerMessage }
@@ -150,7 +152,13 @@ function reduceServer(s: PanelState, m: ServerMessage): PanelState {
         ),
       };
     case 'error':
-      return { ...s, lastError: { code: m.code, message: m.message, retryable: m.retryable } };
+      // A failed turn is over. Without this the panel would stay on "thinking" for ever.
+      return {
+        ...s,
+        phase: s.phase === 'listening' ? s.phase : 'idle',
+        replyDone: false,
+        lastError: { code: m.code, message: m.message, retryable: m.retryable },
+      };
     case 'pong':
       return s;
   }
@@ -173,6 +181,11 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
       return { ...s, visible: false };
     case 'settle':
       return s.phase === 'thinking' && s.replyDone ? { ...s, phase: 'idle', replyDone: false } : s;
+    case 'no_response':
+      // Only when nothing was transcribed. A slow answer to real speech keeps waiting.
+      return s.phase === 'thinking' && s.transcript === ''
+        ? { ...s, phase: 'idle', lastError: { code: 'NO_SPEECH', message: 'I did not catch that. Try again.', retryable: true } }
+        : s;
   }
 }
 

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>CruzClaw voice</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header>
+      <span class="title">CruzClaw voice</span>
+      <button id="close" class="icon" title="Hide (the tray icon stays)" aria-label="Hide">&times;</button>
+    </header>
+    <main>
+      <div class="state"><span id="dot" class="dot"></span><span id="label">Starting</span></div>
+      <div class="meter" aria-label="Microphone level"><div id="level"></div></div>
+      <p class="row"><span class="tag">You</span><span id="said" class="text muted">&nbsp;</span></p>
+      <p class="row"><span class="tag">Reply</span><span id="reply" class="text muted">&nbsp;</span></p>
+      <p id="note" class="note" hidden></p>
+    </main>
+    <footer>
+      <button id="talk">Talk</button>
+      <span id="hint" class="hint"></span>
+    </footer>
+    <p id="diag" class="diag"></p>
+    <script src="panel.js"></script>
+  </body>
+</html>
