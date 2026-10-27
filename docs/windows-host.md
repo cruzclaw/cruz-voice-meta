@@ -16,6 +16,14 @@ Chimes are generated tones: rising when it starts listening, falling when it sta
 
 Electron's binary is not fetched by npm 11 (install scripts are skipped). If `npm start` says Electron is missing, run `node node_modules/electron/install.js` once.
 
+## The assistant's voice is made on this device
+
+By default the host asks the server for text only (`speech: "device"`, see [protocol.md](protocol.md)) and speaks the reply itself with Kokoro-82M. It starts talking at the end of the first sentence while the rest of the reply is still arriving. The model runs in its own Electron utility process, because Kokoro and the wake phrase detector each load their own ONNX runtime and cannot share a process. The first run downloads the model (about 90 MB) and the log says "voice is ready" once it has loaded. If it cannot load, replies show as text and the panel says why.
+
+Set `VOICE_SPEECH=server` to let the server speak instead. If the server does not support text-only sessions, the host uses the server's voice automatically.
+
+Check the voice without a server: `VOICE_TOKEN=x VOICE_SPEECH_SELFTEST=1` (with `ELECTRON_RUN_AS_NODE` unset) makes the voice say a test phrase, reads the speaker's own level meter, prints PASS or FAIL, and quits. It proves the sound reaches the audio output, not that it is pleasant to hear, so listen to it once.
+
 ## How it is split
 
 | Part | Where | Job |

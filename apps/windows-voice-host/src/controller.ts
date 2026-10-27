@@ -11,6 +11,7 @@ import {
   type PanelState,
 } from '@cruzclaw/windows-bridge';
 import type { ClientMessage, ServerMessage } from '@cruzclaw/voice-core';
+import { DeviceSpeech, type SpeechSource } from './device-speech.js';
 
 export type ChimeKind = 'listening' | 'thinking' | 'cancelled';
 
@@ -38,8 +39,11 @@ export interface WakeSource {
 export interface Link {
   send(message: ClientMessage): void;
   sendMic(pcm: Uint8Array): void;
-  /** Starts a session, which makes the server speak its greeting. `fresh` replaces a session that is already active. */
-  startSession(fresh: boolean): Promise<void>;
+  /**
+   * Starts a session, which makes the assistant greet the person. `fresh` replaces a session that is already active.
+   * `speech` asks the server to send text only, because this device speaks it.
+   */
+  startSession(fresh: boolean, speech?: 'device'): Promise<void>;
 }
 
 export interface ControllerOptions {
@@ -54,6 +58,10 @@ export interface ControllerOptions {
   noResponseMs?: number;
   /** After an answer has been spoken, listen for a reply without another press. */
   followUp?: boolean;
+  /** When given, the assistant's replies are spoken on this device and the server is asked for text only. */
+  speak?: SpeechSource['synthesize'];
+  /** Speaking on this device failed. The reply is still shown as text. */
+  onSpeechError?: (error: unknown) => void;
   /** A press after this long without activity starts a new session, with a new greeting. */
   idleGreetMs?: number;
   now?: () => number;
@@ -110,6 +118,7 @@ export class HostController {
   private expectedUtterance: string | undefined;
   /** After an interrupt, replies from the cut-off turn are ignored until the next utterance is recognised. */
   private discardReply = false;
+  private readonly deviceSpeech: DeviceSpeech | undefined;
 
   constructor(
     private readonly link: Link,
@@ -124,6 +133,20 @@ export class HostController {
     this.followUp = options.followUp ?? true;
     this.wake = options.wake;
     this.onWake = options.onWake;
+    if (options.speak) {
+      this.deviceSpeech = new DeviceSpeech({
+        synthesize: options.speak,
+        // What the device says is reported like what a server says, so the state machine has one path.
+        emit: (message) => this.onServer(message, true),
+        play: (pcm) => this.onSpeech(pcm),
+        ...(options.onSpeechError ? { onError: options.onSpeechError } : {}),
+      });
+    }
+  }
+
+  /** True when this device speaks the replies and asks the server for text only. */
+  get speaksLocally(): boolean {
+    return this.deviceSpeech !== undefined;
   }
 
   get display(): DisplayState {
@@ -152,7 +175,7 @@ export class HostController {
     this.dispatch({ kind: 'connection', connected });
   }
 
-  onServer(message: ServerMessage): void {
+  onServer(message: ServerMessage, local = false): void {
     this.lastActivity = this.now();
     // A recognised utterance that is not the latest one belongs to a turn the person already left.
     if ((message.type === 'transcript.final' || message.type === 'transcript.partial') && this.expectedUtterance && message.utteranceId !== this.expectedUtterance) return;
@@ -160,9 +183,9 @@ export class HostController {
     if (message.type === 'transcript.final') this.followUpDue = this.followUp;
     if (this.discardReply && REPLY_MESSAGES.includes(message.type)) return;
 
-    this.dispatch({ kind: 'server', message });
+    this.dispatch({ kind: local ? 'local' : 'server', message });
     if (message.type === 'transcript.final' || message.type === 'error' || message.type === 'session.closed') clearTimeout(this.waiting);
-    if (message.type === 'tts.cancelled') this.audio.stopPlayback();
+    if (message.type === 'tts.cancelled') this.silence();
     if (message.type === 'assistant.text.done') {
       clearTimeout(this.settle);
       this.settle = setTimeout(() => this.dispatch({ kind: 'ui', action: { type: 'settle' } }), SETTLE_MS);
@@ -185,6 +208,8 @@ export class HostController {
       this.greeting = false;
       this.stopAll();
     }
+    if (message.type === 'session.ready') this.deviceSpeech?.reset(message.speech === 'device');
+    else this.deviceSpeech?.onMessage(message);
     this.emit();
   }
 
@@ -241,7 +266,7 @@ export class HostController {
     clearTimeout(this.settle);
     clearTimeout(this.waiting);
     this.audio.stopCapture();
-    this.audio.stopPlayback();
+    this.silence();
     if (this.starting) this.abortStart = true;
     if (phase === 'listening') this.sendInputEnd(); // lets the server drop the audio it has been collecting
     if (phase === 'listening' || phase === 'thinking' || phase === 'speaking' || this.greeting) {
@@ -318,14 +343,14 @@ export class HostController {
       this.followUpDue = false;
       this.discardReply = false;
       this.expectedUtterance = undefined;
-      await this.link.startSession(fresh);
+      await this.link.startSession(fresh, this.speaksLocally ? 'device' : undefined);
       if (this.abortStart) {
         // The person hung up while this was starting. Silence the greeting that has just begun.
         this.abortStart = false;
         this.greeting = false;
         this.discardReply = true;
         this.expectedUtterance = 'interrupted';
-        this.audio.stopPlayback();
+        this.silence();
         this.link.send({ v: 1, type: 'interrupt', reason: 'user' });
       }
     } catch (e) {
@@ -336,6 +361,12 @@ export class HostController {
       this.starting = false;
       this.emit();
     }
+  }
+
+  /** Cuts off whatever is being said, whether the server is sending it or this device is making it. */
+  private silence(): void {
+    this.deviceSpeech?.cancel();
+    this.audio.stopPlayback();
   }
 
   /** Stops listening without waiting for a reply. The server is still told the input ended so it discards the audio. */
@@ -369,7 +400,7 @@ export class HostController {
           this.greeting = false;
           this.listenWhenDrained = false;
           // Anything still playing would be heard by the microphone as the person speaking.
-          this.audio.stopPlayback();
+          this.silence();
           this.audio.chime('listening');
           this.audio.startCapture();
           this.dispatch({ kind: 'ui', action: { type: 'listen_start' } });
@@ -390,7 +421,7 @@ export class HostController {
           return;
         }
         if (effect.message.type === 'interrupt') {
-          this.audio.stopPlayback();
+          this.silence();
           this.discardReply = true;
           this.listenWhenDrained = false;
           this.followUpDue = false;
@@ -418,7 +449,7 @@ export class HostController {
     clearTimeout(this.settle);
     clearTimeout(this.waiting);
     this.audio.stopCapture();
-    this.audio.stopPlayback();
+    this.silence();
   }
 
   /** Tells the shell something changed that is not part of the panel state, such as being in a call. */

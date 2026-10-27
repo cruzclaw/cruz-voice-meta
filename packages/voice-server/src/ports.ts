@@ -33,5 +33,6 @@ export interface Synthesizer {
 export interface Providers {
   transcriber: Transcriber;
   reasoner: Reasoner;
-  synthesizer: Synthesizer;
+  /** Without one, a client that does not speak the text itself gets text only. */
+  synthesizer?: Synthesizer;
 }

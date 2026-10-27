@@ -218,3 +218,73 @@ describe('greeting', () => {
     assert.ok(greetingFor('x'.repeat(200)).length < 80);
   });
 });
+
+describe('speech mode', () => {
+  const build = (providers: { synthesizer?: ToneSynthesizer }, greeting?: string, phrase = 'hello') => {
+    const messages: ServerMessage[] = [];
+    let audioFrames = 0;
+    const session = new VoiceSession({
+      sessionId: 's4',
+      host: new MockEmployeeBackend().hostFor('t1'),
+      providers: { transcriber: new ScriptedTranscriber([phrase]), reasoner: new RuleReasoner(), ...providers },
+      features: { voiceEnabled: true, wakePhraseConsent: false },
+      ...(greeting ? { greeting } : {}),
+      transport: { sendJson: (m) => messages.push(m), sendAudio: () => void audioFrames++, close: () => undefined },
+    });
+    const turn = async () => {
+      session.handleBinary(micFrame);
+      session.handleText(JSON.stringify({ v: 1, type: 'input.end' }));
+      for (let i = 0; i < 500 && !messages.some((m) => m.type === 'assistant.text.done'); i++) await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 30)); // time for any speech that would follow
+    };
+    const ready = () => messages.find((m) => m.type === 'session.ready') as Extract<ServerMessage, { type: 'session.ready' }>;
+    return { session, messages, frames: () => audioFrames, turn, ready, types: () => messages.map((m) => m.type) };
+  };
+  const startWith = (speech?: string) => JSON.stringify({ v: 1, type: 'session.start', audio, ...(speech ? { speech } : {}) });
+
+  it('speaks on the server by default, and says so', async () => {
+    const t = build({ synthesizer: new ToneSynthesizer() });
+    t.session.handleText(startWith());
+    await t.turn();
+    assert.equal(t.ready().speech, 'server');
+    assert.ok(t.types().includes('tts.start'));
+    assert.ok(t.frames() > 0);
+  });
+
+  it('sends text only when the client says it speaks the text itself', async () => {
+    const t = build({ synthesizer: new ToneSynthesizer() }, 'Hi Dana, I am listening.');
+    t.session.handleText(startWith('device'));
+    await t.turn();
+    assert.equal(t.ready().speech, 'device');
+    assert.ok(t.types().includes('assistant.text.delta'));
+    assert.equal(t.frames(), 0);
+    assert.equal(t.types().some((x) => x.startsWith('tts.')), false, t.types().join(', '));
+    // The greeting is still delivered, as text.
+    assert.equal(t.messages.filter((m) => m.type === 'assistant.text.done').length >= 2, true);
+  });
+
+  it('works with no synthesizer at all when the client speaks, and says none when it asked for server speech', async () => {
+    const device = build({});
+    device.session.handleText(startWith('device'));
+    await device.turn();
+    assert.equal(device.ready().speech, 'device');
+    assert.equal(device.types().includes('error'), false);
+
+    const server = build({});
+    server.session.handleText(startWith('server'));
+    await server.turn();
+    assert.equal(server.ready().speech, 'none');
+    assert.equal(server.types().some((x) => x.startsWith('tts.')), false);
+    assert.equal(server.types().includes('error'), false);
+    assert.ok(server.types().includes('assistant.text.done'));
+  });
+
+  it('still proposes the approval-gated task in device mode', async () => {
+    const t = build({}, undefined, 'Please draft an email to Maria');
+    t.session.handleText(startWith('device'));
+    await t.turn();
+    assert.ok(t.types().includes('task.proposed'));
+    assert.ok(t.types().includes('approval.requested'));
+  });
+});
+

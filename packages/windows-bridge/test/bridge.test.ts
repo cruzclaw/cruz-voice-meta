@@ -86,6 +86,20 @@ describe('panel state', () => {
     assert.equal(s.transcript, 'two');
   });
 
+  it('applies a message the host made itself, even though it carries no server seq, and does not disturb the server seq', () => {
+    let s = run([server({ type: 'transcript.final', utteranceId: 'u', text: 'one' })], ready());
+    const seqBefore = s.lastSeq;
+    const fmt = { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 } as const;
+    s = reducePanel(s, { kind: 'local', message: { v: 1, seq: 0, type: 'tts.start', ttsId: 'l', turnId: 't', audio: fmt } });
+    assert.equal(displayState(s), 'speaking');
+    assert.equal(s.lastSeq, seqBefore, 'the next real server message is not mistaken for a replay');
+    s = reducePanel(s, { kind: 'local', message: { v: 1, seq: 0, type: 'tts.end', ttsId: 'l' } });
+    assert.equal(displayState(s), 'idle');
+    // The same message as a server message is dropped as a replay, which is why local exists.
+    const dropped = reducePanel(s, { kind: 'server', message: { v: 1, seq: 0, type: 'tts.start', ttsId: 'l', turnId: 't', audio: fmt } });
+    assert.equal(dropped, s);
+  });
+
   it('settles out of thinking when the reply ended without speech', () => {
     let s = run([server({ type: 'transcript.final', utteranceId: 'u', text: 'hi' }), server({ type: 'assistant.text.done', turnId: 't' })], ready());
     assert.equal(displayState(s), 'thinking');

@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, Tray, utilityProcess } from 'electron';
 import { DEFAULT_SHORTCUT, EndpointDetector, expandedBounds, miniBounds, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
 import { createSherpaWakeDetector, type WakeDetector } from '@cruzclaw/wake-word';
 import { VoiceClient } from './client.js';
 import { ConnectionError, CruzBackendConnection, StaticConnection, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
+import { SpeechClient, type SpeechChild } from './speech-client.js';
 
 /**
  * Windows voice host. Global shortcut and tray in front, a hidden window that owns the
@@ -33,6 +34,10 @@ const WAKE_MODEL_DIR =
 const AUTO_END = process.env.VOICE_AUTO_END !== '0';
 /** After each answer it listens for a reply by itself. Set VOICE_FOLLOW_UP=0 to need a press every time. */
 const FOLLOW_UP = process.env.VOICE_FOLLOW_UP !== '0';
+/** The assistant's voice is made on this device, in its own process. Set VOICE_SPEECH=server to let the server speak instead. */
+const DEVICE_SPEECH = process.env.VOICE_SPEECH !== 'server';
+/** Set VOICE_SPEECH_SELFTEST=1 to make the voice say a test phrase, measure the speaker, report, and quit. */
+const SPEECH_SELFTEST = process.env.VOICE_SPEECH_SELFTEST === '1';
 const END_SILENCE_MS = Math.min(3000, Math.max(300, Number(process.env.VOICE_END_SILENCE_MS) || 900));
 
 const STATE_COLOR: Record<DisplayState, [number, number, number]> = {
@@ -87,6 +92,8 @@ let quitting = false;
 
 /** Chunks handed to the speaker since playback last stopped, and whether any may still be audible. */
 let chunksSent = 0;
+/** The loudest the speaker has been since launch, for the speech self-test. */
+let peakSpeakerLevel = 0;
 let speakerBusy = false;
 
 const audio: AudioDevice = {
@@ -107,6 +114,17 @@ const audio: AudioDevice = {
   listenForWake: (on) => audioWindow?.webContents.send('wake-mic', on),
 };
 
+/** The speech process starts the first time the voice is needed, not at launch. */
+function spawnSpeechProcess(): SpeechChild {
+  const child = utilityProcess.fork(path.join(__dirname, 'speech-process.cjs'), [], { serviceName: 'CruzClaw voice', stdio: 'inherit' });
+  return {
+    endpoint: { post: (message) => child.postMessage(message), onMessage: (listener) => void child.on('message', listener) },
+    onExit: (listener) => void child.on('exit', listener),
+    kill: () => void child.kill(),
+  };
+}
+const speechClient = DEVICE_SPEECH ? new SpeechClient(spawnSpeechProcess) : undefined;
+
 /** One id for this launch, so the assistant keeps its memory of the conversation across greetings. */
 const CONVERSATION_ID = `host-${randomUUID()}`;
 
@@ -114,11 +132,21 @@ const controller = new HostController(
   {
     send: (message) => client?.send(message),
     sendMic: (pcm) => client?.sendMic(pcm),
-    startSession: (fresh) => startSession(fresh),
+    startSession: (fresh, speech) => startSession(fresh, speech),
   },
   audio,
   {
     followUp: FOLLOW_UP,
+    ...(speechClient
+      ? {
+          speak: (text: string, signal: AbortSignal) => speechClient.synthesize(text, signal),
+          onSpeechError: (e: unknown) => {
+            const reason = e instanceof Error ? e.message : 'the voice failed';
+            log(`speech problem: ${reason}`);
+            setDiag(`Voice problem: ${reason.slice(0, 120)}`);
+          },
+        }
+      : {}),
     onWake: (phrase) => {
       log(`wake phrase heard: ${phrase}`);
       if (panel && !panel.isVisible()) panel.showInactive();
@@ -277,7 +305,7 @@ function scheduleReconnect(): void {
 }
 
 /** Starts a voice session. A fresh one replaces the current connection, because a connection carries one session. */
-async function startSession(fresh: boolean): Promise<void> {
+async function startSession(fresh: boolean, speech?: 'device'): Promise<void> {
   if (fresh && client) {
     const old = client;
     client = undefined;
@@ -286,7 +314,36 @@ async function startSession(fresh: boolean): Promise<void> {
     await connectOnce();
   }
   if (!client) throw new Error('Not connected to the voice server');
-  await client.startSession(CONVERSATION_ID);
+  await client.startSession(CONVERSATION_ID, speech);
+}
+
+/**
+ * Proves the whole voice path on this machine without a server: the speech process makes a phrase,
+ * it goes to the speaker, and the speaker's own level meter hears it. Prints the result and quits.
+ */
+async function speechSelfTest(): Promise<void> {
+  const phrase = 'Hello. This is a test of the voice on this device.';
+  let bytes = 0;
+  let code = 1;
+  try {
+    if (!speechClient) throw new Error('device speech is off');
+    const started = Date.now();
+    let firstChunkMs = -1;
+    for await (const pcm of speechClient.synthesize(phrase, new AbortController().signal)) {
+      if (firstChunkMs < 0) firstChunkMs = Date.now() - started;
+      bytes += pcm.byteLength;
+      audio.play(pcm);
+    }
+    const seconds = bytes / 2 / 24000;
+    log(`selftest: made ${seconds.toFixed(1)} s of speech, first audio after ${firstChunkMs} ms`);
+    await new Promise((r) => setTimeout(r, seconds * 1000 + 800)); // let it play out
+    log(`selftest: loudest speaker level ${peakSpeakerLevel.toFixed(3)}`);
+    code = bytes > 0 && peakSpeakerLevel > 0.01 ? 0 : 2;
+    log(code === 0 ? 'selftest: PASS, the voice reached the speaker' : 'selftest: FAIL, speech was made but the speaker stayed silent');
+  } catch (e) {
+    log(`selftest: FAIL, ${e instanceof Error ? e.message : 'unknown error'}`);
+  }
+  app.exit(code);
 }
 
 function createAudioWindow(): BrowserWindow {
@@ -421,9 +478,9 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.on('out-level', (event, level: unknown) => {
       // How loud the assistant's voice is right now, measured at the speaker, to move the orb with it.
-      if (event.sender === audioWindow?.webContents && typeof level === 'number' && controller.state.phase === 'speaking') {
-        panel?.webContents.send('panel-level', level);
-      }
+      if (event.sender !== audioWindow?.webContents || typeof level !== 'number') return;
+      peakSpeakerLevel = Math.max(peakSpeakerLevel, level);
+      if (controller.state.phase === 'speaking') panel?.webContents.send('panel-level', level);
     });
     ipcMain.on('panel-hide', (event) => {
       if (event.sender === panel?.webContents) panel.hide();
@@ -459,9 +516,14 @@ if (!app.requestSingleInstanceLock()) {
         (e: unknown) => log(`wake phrase is off: ${e instanceof Error ? e.message : 'could not start'}`),
       );
     }
-    void connectOnce();
+    if (speechClient) {
+      void speechClient.warmUp().then((ok) => log(ok ? 'voice is ready' : 'the voice could not be loaded. Replies will show as text only.'));
+      if (SPEECH_SELFTEST) audioWindow.webContents.once('did-finish-load', () => void speechSelfTest());
+    }
+    if (!SPEECH_SELFTEST) void connectOnce();
   });
   app.on('before-quit', () => {
+    speechClient?.dispose();
     quitting = true;
     controller.dispose();
     clearTimeout(reconnectTimer);

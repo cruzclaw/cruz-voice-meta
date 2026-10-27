@@ -12,9 +12,15 @@ A client message that contains `accountId`, `userId`, `tenantId`, `organizationI
 
 ## Order
 
-1. Client sends `session.start` (audio format, optional conversation and locale, optional `resumeFromSeq`).
-2. Server replies `session.ready`. Until then the server accepts only `ping` and `session.end`, and no audio.
+1. Client sends `session.start` (audio format, optional conversation and locale, optional `speech`, optional `resumeFromSeq`).
+2. Server replies `session.ready`, which says who speaks (see Speech mode). Until then the server accepts only `ping` and `session.end`, and no audio.
 3. Audio and other messages flow. Either side can end the session.
+
+## Speech mode
+
+`session.start` may carry `speech: "device"` to say the client turns the assistant's text into sound itself. The server then sends the reply as `assistant.text.delta` and `assistant.text.done` only: no audio frames and no `tts.*` messages. Omitted or `"server"` means the server speaks, as before.
+
+`session.ready` echoes the mode in effect: `"server"`, `"device"`, or `"none"` (the client asked for server speech but this server has no voice, so only text arrives). A `session.ready` without the field means `"server"`. A client must follow what `session.ready` says, not what it asked for, so a server that does not know the field leaves a client working. A client cannot request `"none"`.
 
 ## Client messages
 

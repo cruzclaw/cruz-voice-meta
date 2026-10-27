@@ -80,7 +80,7 @@ export class VoiceClient {
   }
 
   /** Starts a session and resolves when the server says it is ready. Rejects if it refuses. */
-  startSession(conversationId: string, timeoutMs = 10000): Promise<void> {
+  startSession(conversationId: string, speech?: 'device', timeoutMs = 10000): Promise<void> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => settle(new Error('The voice server did not start the session in time')), timeoutMs);
       const settle = (error?: Error): void => {
@@ -90,7 +90,7 @@ export class VoiceClient {
         else resolve();
       };
       this.waiting = { resolve: () => settle(), reject: settle };
-      this.send({ v: PROTOCOL_VERSION, type: 'session.start', conversationId, audio: HOST_AUDIO });
+      this.send({ v: PROTOCOL_VERSION, type: 'session.start', conversationId, audio: HOST_AUDIO, ...(speech ? { speech } : {}) });
     });
   }
 

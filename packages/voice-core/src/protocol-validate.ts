@@ -8,6 +8,7 @@ import {
   type ParseResult,
   type ProtocolErrorCode,
   type ServerMessage,
+  type SpeechMode,
 } from './protocol.js';
 
 type Obj = Record<string, unknown>;
@@ -71,6 +72,13 @@ function audio(o: Obj): AudioFormat {
   return { encoding: 'pcm_s16le', sampleRate: a.sampleRate as AudioFormat['sampleRate'], channels: 1 };
 }
 
+function speechMode(o: Obj, allowed: SpeechMode[]): SpeechMode | undefined {
+  const v = o.speech;
+  if (v === undefined) return undefined;
+  if (typeof v !== 'string' || !allowed.includes(v as SpeechMode)) return bad('speech is not a supported mode');
+  return v as SpeechMode;
+}
+
 function parseJson(raw: string | unknown): unknown {
   if (typeof raw !== 'string') return raw;
   if (raw.length > LIMITS.maxJsonBytes) throw new Reject('INVALID_MESSAGE', 'message is too large');
@@ -108,6 +116,8 @@ export function parseClientMessage(raw: string | unknown): ParseResult<ClientMes
         const conversationId = str(o, 'conversationId', LIMITS.maxIdChars, true);
         const locale = str(o, 'locale', 35, true);
         const resumeFromSeq = int(o, 'resumeFromSeq', true);
+        const speech = speechMode(o, ['server', 'device']);
+        if (speech !== undefined) msg.speech = speech;
         if (conversationId !== undefined) msg.conversationId = conversationId;
         if (locale !== undefined) msg.locale = locale;
         if (resumeFromSeq !== undefined) msg.resumeFromSeq = resumeFromSeq;
@@ -151,7 +161,16 @@ export function parseServerMessage(raw: string | unknown): ParseResult<ServerMes
     const base = { v: PROTOCOL_VERSION, seq } as const;
     switch (o.type) {
       case 'session.ready':
-        return { ...base, type: 'session.ready', sessionId: str(o, 'sessionId') as string, audio: audio(o) };
+      {
+        const speech = speechMode(o, ['server', 'device', 'none']);
+        return {
+          ...base,
+          type: 'session.ready',
+          sessionId: str(o, 'sessionId') as string,
+          audio: audio(o),
+          ...(speech === undefined ? {} : { speech }),
+        };
+      }
       case 'transcript.partial':
       case 'transcript.final':
         return {

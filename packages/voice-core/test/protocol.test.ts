@@ -66,6 +66,17 @@ describe('parseClientMessage', () => {
     }
   });
 
+  it('accepts the speech mode server or device, and nothing else', () => {
+    for (const speech of ['server', 'device']) {
+      const r = parseClientMessage({ ...start, speech });
+      assert.equal(r.ok && r.message.type === 'session.start' && r.message.speech, speech);
+    }
+    const omitted = parseClientMessage(start);
+    assert.equal(omitted.ok && 'speech' in omitted.message, false);
+    // A client cannot ask for "none": that is what a server with no voice says about itself.
+    for (const speech of ['none', 'both', '', 7, null]) assert.equal(parseClientMessage({ ...start, speech }).ok, false, String(speech));
+  });
+
   it('drops unknown extra fields from the parsed result', () => {
     const r = parseClientMessage({ ...start, extra: 'ignored' });
     assert.equal(r.ok && 'extra' in r.message, false);
@@ -79,6 +90,17 @@ describe('parseServerMessage', () => {
     assert.equal(parseServerMessage({ v: 1, seq: 3, type: 'tts.cancelled', ttsId: 't' }).ok, true);
     assert.equal(parseServerMessage({ v: 1, seq: 0, type: 'tts.end', ttsId: 't' }).ok, false);
     assert.equal(parseServerMessage({ v: 1, type: 'tts.end', ttsId: 't' }).ok, false);
+  });
+
+  it('carries the speech mode on session.ready, and keeps working without it', () => {
+    const ready = { v: 1, seq: 1, type: 'session.ready', sessionId: 's1', audio };
+    for (const speech of ['server', 'device', 'none']) {
+      const r = parseServerMessage({ ...ready, speech });
+      assert.equal(r.ok && r.message.type === 'session.ready' && r.message.speech, speech);
+    }
+    const old = parseServerMessage(ready);
+    assert.equal(old.ok && 'speech' in old.message, false);
+    assert.equal(parseServerMessage({ ...ready, speech: 'loud' }).ok, false);
   });
 
   it('checks host records are objects and errors carry retryable', () => {

@@ -38,12 +38,20 @@ export const LIMITS = {
 
 // ---- Client to server ----
 
+/** `none` is only ever sent by a server that has no voice of its own: the client gets text only. */
+export type SpeechMode = 'server' | 'device' | 'none';
+
 export interface SessionStart {
   v: typeof PROTOCOL_VERSION;
   type: 'session.start';
   conversationId?: string;
   audio: AudioFormat;
   locale?: string;
+  /**
+   * Who turns the assistant's text into sound. `device` means this client speaks the text itself, so
+   * the server sends no audio and no tts.* messages. Omitted means `server`.
+   */
+  speech?: SpeechMode;
   /** Last server seq the client processed, to resume after a reconnect. */
   resumeFromSeq?: number;
 }
@@ -108,6 +116,8 @@ export interface SessionReady extends ServerBase {
   type: 'session.ready';
   sessionId: string;
   audio: AudioFormat;
+  /** Who speaks the assistant's text in this session. Absent means `server`, as before this field existed. */
+  speech?: SpeechMode;
 }
 
 export interface TranscriptPartial extends ServerBase {

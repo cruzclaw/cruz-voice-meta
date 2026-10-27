@@ -74,6 +74,8 @@ export type UiAction =
 
 export type PanelEvent =
   | { kind: 'server'; message: ServerMessage }
+  /** A message the host made itself, such as the start of speech it is producing. It has no server seq, so it is never a replay. */
+  | { kind: 'local'; message: ServerMessage }
   | { kind: 'connection'; connected: boolean }
   | { kind: 'ui'; action: UiAction };
 
@@ -217,6 +219,8 @@ export function reducePanel(s: PanelState, e: PanelEvent): PanelState {
       if (e.message.seq <= s.lastSeq) return s;
       return { ...reduceServer(s, e.message), lastSeq: e.message.seq };
     }
+    case 'local':
+      return reduceServer(s, e.message);
     case 'connection':
       // A new connection starts a new server seq, and a drop abandons any turn in flight.
       return e.connected

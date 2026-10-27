@@ -8,6 +8,7 @@ import {
   type ClientMessage,
   type ProtocolErrorCode,
   type ServerMessage,
+  type SpeechMode,
   type VoiceEmployeeHost,
   type VoiceFeatureConfig,
 } from '@cruzclaw/voice-core';
@@ -43,6 +44,7 @@ const MAX_SPEECH_CHUNK_BYTES = 32 * 1024;
 export class VoiceSession {
   private readonly guard = new SessionGuard();
   private format: AudioFormat | undefined;
+  private speech: SpeechMode = 'server';
   private conversationId = '';
   private seq = 0;
   private audioSeq = 0;
@@ -127,9 +129,11 @@ export class VoiceSession {
       return;
     }
     this.format = message.audio;
+    // A client that speaks the text itself is never sent audio. Otherwise the server speaks if it can.
+    this.speech = message.speech === 'device' ? 'device' : this.opts.providers.synthesizer ? 'server' : 'none';
     this.conversationId = message.conversationId ?? `conv-${this.opts.sessionId}`;
     this.guard.markReady();
-    this.send({ type: 'session.ready', sessionId: this.opts.sessionId, audio: message.audio });
+    this.send({ type: 'session.ready', sessionId: this.opts.sessionId, audio: message.audio, speech: this.speech });
     if (this.opts.greeting) this.greet(this.opts.greeting);
   }
 
@@ -231,11 +235,12 @@ export class VoiceSession {
   }
 
   private async speak(text: string, turnId: string, signal: AbortSignal): Promise<void> {
-    if (!text.trim() || signal.aborted) return;
+    const synthesizer = this.opts.providers.synthesizer;
+    if (this.speech !== 'server' || !synthesizer || !text.trim() || signal.aborted) return;
     const format = this.format!;
     const ttsId = `tts-${turnId}`;
     this.send({ type: 'tts.start', ttsId, turnId, audio: format });
-    for await (const chunk of this.opts.providers.synthesizer.synthesize(text, format, signal)) {
+    for await (const chunk of synthesizer.synthesize(text, format, signal)) {
       if (signal.aborted) break;
       for (let at = 0; at < chunk.byteLength; at += MAX_SPEECH_CHUNK_BYTES) {
         this.opts.transport.sendAudio(

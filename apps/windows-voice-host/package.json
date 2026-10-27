@@ -11,6 +11,7 @@
     "start": "node build.mjs && node start.mjs"
   },
   "dependencies": {
+    "@cruzclaw/tts-kokoro": "*",
     "@cruzclaw/voice-core": "*",
     "@cruzclaw/wake-word": "*",
     "@cruzclaw/windows-bridge": "*",
