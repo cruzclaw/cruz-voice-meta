@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { MetaTranscriber } from './meta-transcriber.js';
 import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from './mock-providers.js';
-import type { Transcriber } from './ports.js';
+import type { Synthesizer, Transcriber } from './ports.js';
 import { createDemoServer } from './server.js';
 
 // Optional local secrets file next to this app. It is git-ignored; never commit it.
@@ -22,10 +22,27 @@ if (apiKey) {
   console.log('speech to text: MOCK. It ignores your voice and returns scripted phrases. Set MODEL_API_KEY for real recognition.');
 }
 
-/** Loopback only. Mock reasoning and speech until their adapters are added. */
+// Kokoro lives in its own package and is loaded on demand. TTS=tone skips it.
+let synthesizer: Synthesizer = new ToneSynthesizer();
+if (process.env.TTS !== 'tone') {
+  try {
+    const { KokoroSynthesizer } = await import('@cruzclaw/tts-kokoro');
+    const kokoro = new KokoroSynthesizer();
+    console.log('text to speech: loading Kokoro (first run downloads about 90 MB)...');
+    await kokoro.warmUp();
+    synthesizer = kokoro;
+    console.log('text to speech: Kokoro (local)');
+  } catch (e) {
+    console.log(`text to speech: tone only, Kokoro unavailable (${(e as Error).message})`);
+  }
+} else {
+  console.log('text to speech: tone only (TTS=tone)');
+}
+
+/** Loopback only. Mock reasoning until its adapter is added. */
 const demo = createDemoServer({
   accounts: [{ token, tenantKey: 'demo', features: { voiceEnabled: true } }],
-  providers: { transcriber, reasoner: new RuleReasoner(), synthesizer: new ToneSynthesizer() },
+  providers: { transcriber, reasoner: new RuleReasoner(), synthesizer },
   killSwitch: process.env.VOICE_FEATURE_DISABLED === 'true',
 });
 
