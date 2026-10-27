@@ -40,7 +40,7 @@ function renderTurns() {
   if (!turns.length) {
     const p = document.createElement('p');
     p.className = 'empty';
-    p.textContent = shortcut ? `Press Talk or ${shortcut} to start.` : 'Press Talk to start.';
+    p.textContent = shortcut ? `Press Call or ${shortcut} to start.` : 'Press Call to start.';
     log.append(p);
     return;
   }

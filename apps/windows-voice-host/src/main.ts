@@ -306,7 +306,7 @@ function summon(): void {
 
 function trayMenu(): Menu {
   return Menu.buildFromTemplate([
-    { label: `Talk (${SHORTCUT})`, click: () => summon() },
+    { label: `Call (${SHORTCUT})`, click: () => summon() },
     { label: 'Hang up', click: () => controller.hangUp() },
     { label: 'Show panel', click: () => panel?.showInactive() },
     { label: 'Test speaker', click: () => audioWindow?.webContents.send('beep') },
