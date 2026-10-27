@@ -511,6 +511,107 @@ describe('HostController timing and interrupts', () => {
     t.c.dispose();
   });
 
+  it('hanging up ends the whole conversation: nothing more is heard, said or listened for', () => {
+    const t = scripted({ endpoint: new EndpointDetector() });
+    t.active();
+    t.c.command('summon');
+    assert.equal(t.c.inCall, true);
+    t.c.hangUp();
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.c.inCall, false);
+    assert.deepEqual(t.sent.map((m) => m.type), ['input.end', 'interrupt'], 'the server drops the audio and any answer');
+    // What the server still had in flight is ignored, and no follow-up listening comes of it.
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'half' });
+    t.server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'Answer.' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    t.server({ type: 'tts.end', ttsId: 't' });
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.audio.calls.filter((x) => x === 'start').length, 1, 'no follow-up listening after hanging up');
+    t.c.dispose();
+  });
+
+  it('hanging up while it speaks or thinks stops the voice at once and cancels the pending follow-up', () => {
+    const t = scripted();
+    t.active();
+    t.c.command('summon');
+    t.c.command('summon');
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'hello' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    t.c.onSpeech(new Uint8Array(960));
+    assert.equal(t.c.inCall, true);
+    t.c.hangUp();
+    assert.equal(t.audio.isPlaying(), false);
+    assert.equal(t.c.inCall, false);
+    assert.ok(t.sent.some((m) => m.type === 'interrupt'));
+    t.server({ type: 'tts.end', ttsId: 't' });
+    t.c.onPlaybackDrained();
+    assert.equal(t.audio.calls.filter((x) => x === 'start').length, 1);
+    t.c.dispose();
+  });
+
+  it('the next call after hanging up listens straight away, with no new greeting', () => {
+    const t = scripted();
+    t.active();
+    t.c.command('summon');
+    t.c.hangUp();
+    t.c.press();
+    assert.equal(t.c.display, 'listening');
+    assert.deepEqual(t.starts, [], 'the session was kept, so no new session or greeting');
+    // And the new turn is answered normally.
+    t.c.command('summon');
+    t.server({ type: 'transcript.final', utteranceId: 'host-2', text: 'again' });
+    assert.equal(t.c.state.transcript, 'again');
+    t.c.dispose();
+  });
+
+  it('hanging up while the session is still starting silences the greeting that follows', async () => {
+    const sent: ClientMessage[] = [];
+    const audio = new FakeAudio(Number.POSITIVE_INFINITY);
+    let finish!: () => void;
+    const fmt = { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 } as const;
+    let n = 0;
+    const c: HostController = new HostController(
+      {
+        send: (m) => void sent.push(m),
+        sendMic: () => undefined,
+        // The server says ready, then the session start resolves, then the greeting messages arrive.
+        startSession: () => new Promise<void>((resolve) => {
+          finish = () => { c.onServer({ v: 1, seq: ++n, type: 'session.ready', sessionId: 's', audio: fmt }); resolve(); };
+        }),
+      },
+      audio,
+    );
+    c.setConnected(true);
+    c.command('summon'); // starts the session
+    assert.equal(c.inCall, true);
+    c.hangUp(); // before the server has answered
+    finish();
+    await new Promise((r) => setTimeout(r, 5));
+    c.onServer({ v: 1, seq: ++n, type: 'assistant.text.delta', turnId: 'turn-1', text: 'Hi there.' });
+    c.onServer({ v: 1, seq: ++n, type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: fmt });
+    c.onSpeech(new Uint8Array(960));
+    assert.equal(c.state.reply, '', 'the greeting is not shown');
+    assert.equal(audio.played, 0, 'and not played');
+    assert.equal(c.inCall, false);
+    assert.ok(sent.some((m) => m.type === 'interrupt'), 'the server is told to drop it');
+    c.dispose();
+  });
+
+  it('inCall covers the gaps between turns, so the button does not flicker', () => {
+    const t = scripted();
+    t.active();
+    assert.equal(t.c.inCall, false);
+    t.c.command('summon');
+    t.c.command('summon');
+    t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'hello' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    t.c.onSpeech(new Uint8Array(960)); // the speaker is still sounding
+    t.server({ type: 'tts.end', ttsId: 't' }); // display is idle now, but the follow-up is due
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.c.inCall, true);
+    t.c.dispose();
+  });
+
   it('a press with no session starts one, and a normal press afterwards does not', async () => {
     const t = scripted();
     t.c.command('summon');

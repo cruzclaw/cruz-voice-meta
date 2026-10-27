@@ -74,6 +74,8 @@ export class HostController {
   private waiting: ReturnType<typeof setTimeout> | undefined;
   private lastActivity = 0;
   private starting = false;
+  /** Hang up arrived while the session was still starting, so its greeting must not play. */
+  private abortStart = false;
   /** True from the start of a session until the greeting has been spoken or skipped. */
   private greeting = false;
   /** The greeting was fully sent but is still playing; listening starts when the speaker falls silent. */
@@ -103,6 +105,15 @@ export class HostController {
 
   get display(): DisplayState {
     return displayState(this.state);
+  }
+
+  /**
+   * True from the moment a call starts until it ends, including the short gaps between turns when
+   * nothing is visibly happening, so the Call and Hang up button does not flicker.
+   */
+  get inCall(): boolean {
+    const busy = this.state.phase === 'listening' || this.state.phase === 'thinking' || this.state.phase === 'speaking';
+    return busy || this.starting || this.greeting || this.listenWhenDrained || this.followUpDue;
   }
 
   setConnected(connected: boolean): void {
@@ -143,6 +154,7 @@ export class HostController {
       this.greeting = false;
       this.stopAll();
     }
+    this.emit();
   }
 
   /** The speaker has finished everything it was given. */
@@ -179,6 +191,31 @@ export class HostController {
     this.command('summon');
   }
 
+  /**
+   * Ends the conversation: nothing more is heard, said or answered, and nothing listens again by itself.
+   * The session stays open, so the next call carries on without a new greeting.
+   */
+  hangUp(): void {
+    const phase = this.state.phase;
+    clearTimeout(this.cap);
+    clearTimeout(this.settle);
+    clearTimeout(this.waiting);
+    this.audio.stopCapture();
+    this.audio.stopPlayback();
+    if (this.starting) this.abortStart = true;
+    if (phase === 'listening') this.sendInputEnd(); // lets the server drop the audio it has been collecting
+    if (phase === 'listening' || phase === 'thinking' || phase === 'speaking' || this.greeting) {
+      this.link.send({ v: 1, type: 'interrupt', reason: 'user' });
+    }
+    this.listenWhenDrained = false;
+    this.followUpDue = false;
+    this.nextListenQuiet = false;
+    this.greeting = false;
+    this.discardReply = true;
+    this.expectedUtterance = 'interrupted';
+    this.dispatch({ kind: 'ui', action: { type: 'hung_up' } });
+  }
+
   /** Mutes or unmutes the microphone. Muting while listening drops what was said so far without an answer. */
   toggleMute(): void {
     const wasListening = this.state.phase === 'listening';
@@ -202,10 +239,12 @@ export class HostController {
     if (command === 'summon' && this.needsSession()) {
       this.lastActivity = this.now();
       void this.beginSession();
+      this.emit();
       return;
     }
     this.lastActivity = this.now();
     for (const effect of effectsFor(this.state, command)) this.apply(effect);
+    this.emit();
   }
 
   /** Stops timers and devices. Call when the app quits. */
@@ -229,11 +268,22 @@ export class HostController {
       this.discardReply = false;
       this.expectedUtterance = undefined;
       await this.link.startSession(fresh);
+      if (this.abortStart) {
+        // The person hung up while this was starting. Silence the greeting that has just begun.
+        this.abortStart = false;
+        this.greeting = false;
+        this.discardReply = true;
+        this.expectedUtterance = 'interrupted';
+        this.audio.stopPlayback();
+        this.link.send({ v: 1, type: 'interrupt', reason: 'user' });
+      }
     } catch (e) {
+      this.abortStart = false;
       this.greeting = false;
       this.dispatch({ kind: 'ui', action: { type: 'session_failed', message: e instanceof Error ? e.message : 'Could not start the session' } });
     } finally {
       this.starting = false;
+      this.emit();
     }
   }
 
@@ -316,6 +366,11 @@ export class HostController {
     clearTimeout(this.waiting);
     this.audio.stopCapture();
     this.audio.stopPlayback();
+  }
+
+  /** Tells the shell something changed that is not part of the panel state, such as being in a call. */
+  private emit(): void {
+    this.onChange(this.state, this.display);
   }
 
   private dispatch(event: PanelEvent): void {

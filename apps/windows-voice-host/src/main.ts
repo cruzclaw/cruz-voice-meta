@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, session, Tray } from 'electron';
-import { DEFAULT_SHORTCUT, EndpointDetector, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
+import { DEFAULT_SHORTCUT, EndpointDetector, expandedBounds, miniBounds, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
 import { VoiceClient } from './client.js';
 import { HostController, type AudioDevice } from './controller.js';
 
@@ -18,6 +18,8 @@ const TOKEN = process.env.VOICE_TOKEN ?? '';
 const SHORTCUT = process.env.VOICE_SHORTCUT ?? DEFAULT_SHORTCUT;
 /** Set VOICE_DEBUG_DUMP=1 to save the last thing the microphone heard as a WAV file in the temp folder. */
 const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
+/** The panel is 10% narrower than the 380 px the layout started from. */
+const PANEL_WIDTH = Math.round(380 * 0.9);
 const PANEL_HEIGHT = 330;
 /** Listening ends by itself after this much quiet. Set VOICE_AUTO_END=0 to end it with a second press only. */
 const AUTO_END = process.env.VOICE_AUTO_END !== '0';
@@ -65,6 +67,8 @@ function dot(display: DisplayState) {
 
 let audioWindow: BrowserWindow | undefined;
 let panel: BrowserWindow | undefined;
+/** The panel is shrunk to the bar above the taskbar. */
+let mini = false;
 let diag = '';
 let utterance: Buffer[] = [];
 let wasListening = false;
@@ -135,6 +139,8 @@ function pushPanel(state: PanelState, display: DisplayState): void {
     shortcut: SHORTCUT,
     autoEnd: AUTO_END,
     muted: state.micMuted,
+    inCall: controller.inCall,
+    mini,
     debug: DUMP,
   });
 }
@@ -261,11 +267,25 @@ function createAudioWindow(): BrowserWindow {
   return win;
 }
 
+function displayInfos() {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d) => ({ id: d.id, workArea: d.workArea, primary: d.id === primary }));
+}
+
+/** Shrinks the panel to a thin bar just above the taskbar, or brings the full panel back. */
+function setMini(on: boolean): void {
+  if (!panel || on === mini) return;
+  mini = on;
+  const now = panel.getBounds();
+  panel.setBounds(on ? miniBounds(displayInfos(), now, PANEL_HEIGHT) : expandedBounds(displayInfos(), now, { width: PANEL_WIDTH, height: PANEL_HEIGHT }));
+  if (!panel.isVisible()) panel.showInactive();
+  pushPanel(controller.state, controller.display);
+}
+
 function createPanel(): BrowserWindow {
   const options = panelWindowOptions(path.join(__dirname, 'panel-preload.cjs'));
-  const win = new BrowserWindow({ ...options, height: PANEL_HEIGHT });
-  const displays = screen.getAllDisplays().map((d) => ({ id: d.id, workArea: d.workArea, primary: d.id === screen.getPrimaryDisplay().id }));
-  const bounds = placePanel(displays, screen.getCursorScreenPoint(), undefined, { width: options.width, height: PANEL_HEIGHT });
+  const win = new BrowserWindow({ ...options, width: PANEL_WIDTH, height: PANEL_HEIGHT });
+  const bounds = placePanel(displayInfos(), screen.getCursorScreenPoint(), undefined, { width: PANEL_WIDTH, height: PANEL_HEIGHT });
   if (bounds) win.setBounds(bounds);
   void win.loadFile(path.join(__dirname, 'panel.html'));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -287,6 +307,7 @@ function summon(): void {
 function trayMenu(): Menu {
   return Menu.buildFromTemplate([
     { label: `Talk (${SHORTCUT})`, click: () => summon() },
+    { label: 'Hang up', click: () => controller.hangUp() },
     { label: 'Show panel', click: () => panel?.showInactive() },
     { label: 'Test speaker', click: () => audioWindow?.webContents.send('beep') },
     { label: 'Stop speaking', click: () => controller.command('stop_speaking') },
@@ -336,6 +357,15 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.on('panel-talk', (event) => {
       if (event.sender === panel?.webContents) controller.press();
+    });
+    ipcMain.on('panel-hangup', (event) => {
+      if (event.sender === panel?.webContents) controller.hangUp();
+    });
+    ipcMain.on('panel-minimize', (event) => {
+      if (event.sender === panel?.webContents) setMini(true);
+    });
+    ipcMain.on('panel-expand', (event) => {
+      if (event.sender === panel?.webContents) setMini(false);
     });
     ipcMain.on('panel-mute', (event) => {
       if (event.sender === panel?.webContents) controller.toggleMute();

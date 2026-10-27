@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const orb = $('orb');
 const scroller = $('scroll');
 const log = $('log');
+const miniDot = $('mini-dot');
 
 /** Turns shown in the scroll area. A turn is what the person said and what the assistant answered. */
 let turns = [];
@@ -73,30 +74,39 @@ const CAPTION = {
   task_working: 'Working on it',
 };
 
+let inCall = false;
+
 window.panel.onState((s) => {
+  document.body.classList.toggle('is-mini', !!s.mini);
+  const muted = !!s.muted && s.display !== 'speaking' && s.display !== 'thinking';
   orb.dataset.state = s.display;
-  orb.dataset.muted = String(!!s.muted && s.display !== 'speaking' && s.display !== 'thinking');
-  $('caption').textContent = s.muted && s.display === 'idle' ? 'Microphone muted' : CAPTION[s.display] || s.label;
+  orb.dataset.muted = String(muted);
+  miniDot.dataset.state = s.display;
+  miniDot.dataset.muted = String(muted);
+  const caption = s.muted && s.display === 'idle' ? 'Microphone muted' : CAPTION[s.display] || s.label;
+  $('caption').textContent = caption;
+  $('mini-caption').textContent = caption;
 
   shortcut = s.shortcut || '';
   syncTurns(s);
   renderTurns();
 
-  const talk = $('talk');
-  const stopMode = s.display === 'listening' || s.display === 'speaking' || s.display === 'thinking';
-  talk.dataset.mode = stopMode ? 'stop' : 'talk';
-  talk.dataset.listening = String(s.display === 'listening');
-  talk.disabled = !s.connected;
-  talk.setAttribute(
-    'aria-label',
-    s.display === 'listening' ? 'Done talking' : s.display === 'speaking' || s.display === 'thinking' ? 'Stop and listen' : `Talk (${s.shortcut})`,
-  );
-  talk.title = talk.getAttribute('aria-label');
-
-  const mute = $('mute');
-  mute.setAttribute('aria-pressed', String(!!s.muted));
-  mute.setAttribute('aria-label', s.muted ? 'Unmute microphone' : 'Mute microphone');
-  mute.title = mute.getAttribute('aria-label');
+  // One button starts the call and ends it. Pressing it in a call hangs up, whatever is happening.
+  inCall = !!s.inCall;
+  for (const button of document.querySelectorAll('.js-call')) {
+    button.dataset.mode = inCall ? 'hangup' : 'call';
+    button.dataset.listening = String(s.display === 'listening');
+    button.disabled = !s.connected;
+    const label = inCall ? 'Hang up' : `Call (${s.shortcut})`;
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  }
+  for (const button of document.querySelectorAll('.js-mute')) {
+    button.setAttribute('aria-pressed', String(!!s.muted));
+    const label = s.muted ? 'Unmute microphone' : 'Mute microphone';
+    button.setAttribute('aria-label', label);
+    button.title = label;
+  }
 
   const note = $('note');
   const text = s.approval ? `Needs your approval: ${s.approval}` : s.error;
@@ -120,7 +130,9 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 function frame() {
   target *= 0.9; // fall back toward calm when no new level arrives
   shown += (target - shown) * 0.35;
-  orb.style.setProperty('--level', reduceMotion.matches ? '0' : shown.toFixed(3));
+  const level = reduceMotion.matches ? '0' : shown.toFixed(3);
+  orb.style.setProperty('--level', level);
+  miniDot.style.setProperty('--level', level);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -129,6 +141,10 @@ window.panel.onDiag((text) => {
   $('diag').textContent = text;
 });
 
-$('talk').addEventListener('click', () => window.panel.talk());
-$('mute').addEventListener('click', () => window.panel.mute());
+for (const button of document.querySelectorAll('.js-call')) {
+  button.addEventListener('click', () => (inCall ? window.panel.hangup() : window.panel.talk()));
+}
+for (const button of document.querySelectorAll('.js-mute')) button.addEventListener('click', () => window.panel.mute());
+$('minimize').addEventListener('click', () => window.panel.minimize());
+$('expand').addEventListener('click', () => window.panel.expand());
 $('close').addEventListener('click', () => window.panel.hide());

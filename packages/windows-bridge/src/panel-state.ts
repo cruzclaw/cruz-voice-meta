@@ -65,6 +65,8 @@ export type UiAction =
   | { type: 'no_response' }
   /** The person pressed to talk but said nothing, so listening was dropped. */
   | { type: 'listen_cancel'; quiet?: boolean }
+  /** The person ended the conversation: listening, thinking and speaking all stop. */
+  | { type: 'hung_up' }
   /** The person cut the assistant off, while it was thinking or speaking. */
   | { type: 'interrupted' }
   /** A session could not be opened. */
@@ -188,6 +190,8 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
       return { ...s, visible: false };
     case 'settle':
       return s.phase === 'thinking' && s.replyDone ? { ...s, phase: 'idle', replyDone: false } : s;
+    case 'hung_up':
+      return { ...s, phase: 'idle', replyDone: false };
     case 'interrupted':
       return s.phase === 'thinking' || s.phase === 'speaking' ? { ...s, phase: 'idle', replyDone: false } : s;
     case 'session_failed':

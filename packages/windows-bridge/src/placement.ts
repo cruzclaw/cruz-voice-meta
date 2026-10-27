@@ -52,3 +52,46 @@ export function placePanel(
   const display = pickDisplay(displays, cursor);
   return display ? defaultBounds(display, size) : undefined;
 }
+
+/** The minimised bar is this fraction of the panel's height, but never too thin to hold its buttons. */
+export const MINI_HEIGHT_RATIO = 0.1;
+export const MINI_MIN_HEIGHT = 32;
+/** Gap between the minimised bar and the taskbar. */
+export const MINI_MARGIN = 4;
+
+const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
+const displayOf = (displays: DisplayInfo[], r: Rect): DisplayInfo | undefined =>
+  pickDisplay(displays, { x: r.x + r.width / 2, y: r.y + r.height / 2 });
+
+/**
+ * Where the panel goes when minimised: the same width and left edge, about a tenth of the
+ * height, resting just above the taskbar (the bottom of the work area) of the display it is on.
+ */
+export function miniBounds(displays: DisplayInfo[], current: Rect, fullHeight: number): Rect {
+  const height = Math.max(MINI_MIN_HEIGHT, Math.round(fullHeight * MINI_HEIGHT_RATIO));
+  const area = displayOf(displays, current)?.workArea;
+  if (!area) return { ...current, height };
+  const width = Math.min(current.width, area.width);
+  return {
+    x: clamp(current.x, area.x, area.x + area.width - width),
+    y: area.y + area.height - height - MINI_MARGIN,
+    width,
+    height,
+  };
+}
+
+/** Restores the full panel from the bar: it grows upward from the bar's bottom edge and stays on screen. */
+export function expandedBounds(displays: DisplayInfo[], mini: Rect, size: { width: number; height: number }): Rect {
+  const area = displayOf(displays, mini)?.workArea;
+  const width = area ? Math.min(size.width, area.width) : size.width;
+  const height = area ? Math.min(size.height, area.height) : size.height;
+  const bottom = mini.y + mini.height;
+  if (!area) return { x: mini.x, y: bottom - height, width, height };
+  return {
+    x: clamp(mini.x, area.x, area.x + area.width - width),
+    y: clamp(bottom - height, area.y, area.y + area.height - height),
+    width,
+    height,
+  };
+}

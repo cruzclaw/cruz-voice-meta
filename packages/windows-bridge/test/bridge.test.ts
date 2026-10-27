@@ -9,6 +9,8 @@ import {
   FilePreferenceStore,
   ShortcutManager,
   defaultBounds,
+  expandedBounds,
+  miniBounds,
   displayState,
   effectsFor,
   initialPanelState,
@@ -183,6 +185,19 @@ describe('controls', () => {
     assert.equal(run([ui({ type: 'listen_cancel' })], listening).lastError?.code, 'NO_SPEECH');
   });
 
+  it('hanging up returns every busy phase to idle and keeps what was said on screen', () => {
+    for (const busy of [
+      [ui({ type: 'listen_start' })],
+      [ui({ type: 'listen_start' }), ui({ type: 'listen_end' })],
+      [server({ type: 'tts.start', ttsId: 't', turnId: 'x', audio })],
+    ]) {
+      const before = run([...busy, server({ type: 'transcript.final', utteranceId: 'u', text: 'hello' })], ready());
+      const after = run([ui({ type: 'hung_up' })], before);
+      assert.equal(displayState(after), 'idle');
+      assert.equal(after.transcript, 'hello');
+    }
+  });
+
   it('an interrupt returns thinking or speaking to idle, and a failed session shows its message', () => {
     const thinking = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' }), ui({ type: 'interrupted' })], ready());
     assert.equal(displayState(thinking), 'idle');
@@ -346,5 +361,45 @@ describe('window options', () => {
     assert.equal(o.webPreferences.contextIsolation, true);
     assert.equal(o.webPreferences.nodeIntegration, false);
     assert.equal(o.webPreferences.sandbox, true);
+  });
+});
+
+describe('minimised bar placement', () => {
+  const taskbarBottom: DisplayInfo = { id: 1, primary: true, workArea: { x: 0, y: 0, width: 1920, height: 1040 } }; // a 40 px taskbar
+  const second: DisplayInfo = { id: 2, workArea: { x: 1920, y: 0, width: 1920, height: 1080 } };
+  const full = { x: 1500, y: 600, width: 342, height: 330 };
+
+  it('is a tenth of the height, the same width and left edge, resting just above the taskbar', () => {
+    const mini = miniBounds([taskbarBottom], full, 330);
+    assert.equal(mini.height, 33);
+    assert.equal(mini.width, 342);
+    assert.equal(mini.x, 1500);
+    assert.equal(mini.y + mini.height, 1040 - 4, 'bottom edge is 4 px above the taskbar');
+  });
+
+  it('never goes thinner than its buttons need, and stays on a display where the window is', () => {
+    assert.equal(miniBounds([taskbarBottom], full, 200).height, 32);
+    const onSecond = miniBounds([taskbarBottom, second], { ...full, x: 2400 }, 330);
+    assert.equal(onSecond.y + onSecond.height, 1080 - 4);
+    assert.equal(onSecond.x, 2400);
+  });
+
+  it('pulls a bar that would hang off the right edge back onto the screen', () => {
+    const mini = miniBounds([taskbarBottom], { ...full, x: 1800 }, 330);
+    assert.equal(mini.x, 1920 - 342);
+  });
+
+  it('expands upward from the bar, and stays on screen', () => {
+    const mini = miniBounds([taskbarBottom], full, 330);
+    const back = expandedBounds([taskbarBottom], mini, { width: 342, height: 330 });
+    assert.equal(back.height, 330);
+    assert.equal(back.y + back.height, mini.y + mini.height, 'bottom edge stays where the bar was');
+    const nearTop = expandedBounds([taskbarBottom], { x: 100, y: 10, width: 342, height: 33 }, { width: 342, height: 330 });
+    assert.equal(nearTop.y, 0, 'clamped to the top of the work area');
+  });
+
+  it('with no display information it keeps the size and does not throw', () => {
+    assert.deepEqual(miniBounds([], full, 330), { ...full, height: 33 });
+    assert.equal(expandedBounds([], { x: 5, y: 900, width: 342, height: 33 }, { width: 342, height: 330 }).height, 330);
   });
 });

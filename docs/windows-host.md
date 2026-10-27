@@ -1,6 +1,6 @@
 # Windows voice host
 
-`apps/windows-voice-host` is the Windows app that talks to a voice server. A small panel (about 380 by 330) shows what it is doing: an orb that changes colour with the state and moves with the loudness of whoever is talking (you while listening, the assistant while speaking), the conversation text scrolling below it, and Mute and Talk buttons. The tray icon shows the state too, and the terminal logs what was heard and said.
+`apps/windows-voice-host` is the Windows app that talks to a voice server. A small panel called Cruz (about 342 by 330) shows what it is doing: an orb that changes colour with the state and moves with the loudness of whoever is talking (you while listening, the assistant while speaking), the conversation text scrolling below it, and Mute and Call buttons. The Call button turns into a red Hang up button for as long as a conversation is going: Hang up stops listening, speaking and any answer in progress, and nothing listens again by itself until the next call. The minimise button (before the close button) shrinks the panel to a thin bar, about a tenth of its height, just above the taskbar, with the state, Mute and Call or Hang up; the arrow on the bar expands it again. The shortcut still talks, ends your turn and cuts the assistant off, as before. The tray icon shows the state too, and the terminal logs what was heard and said.
 
 ## Run it locally
 
