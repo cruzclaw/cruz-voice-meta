@@ -5,6 +5,7 @@ import { EndpointDetector } from '@cruzclaw/windows-bridge';
 import { RuleReasoner, ScriptedTranscriber, type Synthesizer } from '@cruzclaw/voice-server';
 import { createDemoServer, type DemoServer } from '../../demo-server/src/server.js';
 import { VoiceClient } from '../src/client.js';
+import { StaticConnection } from '../src/connection.js';
 import { HostController, type AudioDevice, type ChimeKind, type Link, type WakeSource } from '../src/controller.js';
 
 /** A speaker that keeps sounding for a while after the last chunk, like the real one. */
@@ -82,7 +83,7 @@ function host(token: string, now: () => number = Date.now, followUp = true) {
   let mine = 0;
   const make = () => {
     const id = ++mine;
-    return new VoiceClient(`ws://127.0.0.1:${port}`, token, {
+    return new VoiceClient(new StaticConnection(`ws://127.0.0.1:${port}`, token), {
       onMessage: (m) => { if (id === mine) { seen.push(m); controller.onServer(m); } },
       onSpeech: (pcm) => { if (id === mine) controller.onSpeech(pcm); },
       onClose: (reason) => { if (id === mine) { closed.push(reason); controller.setConnected(false); } },
@@ -261,7 +262,7 @@ describe('Windows voice host against the demo server', () => {
   it('refuses a wrong token at connect without leaking it', async () => {
     const h = host('wrong-token-value');
     await assert.rejects(h.open(), (e: Error) => {
-      assert.match(e.message, /refused the connection \(HTTP 401\)/);
+      assert.match(e.message, /did not accept the sign-in or ticket \(HTTP 401\)/);
       assert.equal(e.message.includes('wrong-token-value'), false);
       return true;
     });

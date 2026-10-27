@@ -27,6 +27,23 @@ Electron's binary is not fetched by npm 11 (install scripts are skipped). If `np
 
 The controller and client are tested against the real demo server with a fake microphone and speaker. The audio window is not covered by automated tests and needs a person at a microphone.
 
+## Connecting to the CruzClaw backend
+
+By default the host talks to the demo server. To talk to a real CruzClaw employee, point it at the backend instead:
+
+| Variable | Meaning |
+| --- | --- |
+| `VOICE_API_URL` | The backend, for example `https://api.example.com`. Must be `https://` (plain `http://` is accepted for `localhost` only, so a password cannot cross the network in the clear). |
+| `VOICE_PERSONA_NAME` or `VOICE_PERSONA_ID` | The employee to talk to. A name is matched without regard to case. |
+| `VOICE_EMAIL` and `VOICE_PASSWORD` | Sign in with an account that has voice turned on. |
+| `VOICE_ACCESS_TOKEN` | Alternative to the two above: an access token you already have. It expires, and the app cannot renew it without a refresh token. |
+
+How it connects: the host signs in, finds the employee, and asks `POST /api/voice/ticket` for a ticket. The ticket opens one WebSocket (`/api/voice/ws`) for that user and that employee and works once, so every connection asks for a new one. The server decides who you are from the ticket alone; nothing the app sends can change it. The Meta key never leaves the server.
+
+Setup problems that will not fix themselves, such as a wrong password, an account without voice, or an employee that does not exist, are shown on the panel and logged once. The app does not retry them. Network problems and a busy server are retried with a growing wait.
+
+Accounts that need an emailed code to sign in (admin accounts) cannot sign in this way. Use an access token for those.
+
 ## Wake phrase (optional, off by default)
 
 Say "Hey Cruz", "Hi Cruz", "Hello Cruz" or "Okay Cruz" and the assistant starts a call, as if you had pressed Call.

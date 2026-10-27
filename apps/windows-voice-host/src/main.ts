@@ -6,6 +6,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen,
 import { DEFAULT_SHORTCUT, EndpointDetector, expandedBounds, miniBounds, panelWindowOptions, placePanel, ShortcutManager, type DisplayState, type PanelState } from '@cruzclaw/windows-bridge';
 import { createSherpaWakeDetector, type WakeDetector } from '@cruzclaw/wake-word';
 import { VoiceClient } from './client.js';
+import { ConnectionError, CruzBackendConnection, StaticConnection, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
 
 /**
@@ -16,6 +17,8 @@ import { HostController, type AudioDevice } from './controller.js';
 
 const URL = process.env.VOICE_URL ?? 'ws://127.0.0.1:8787';
 const TOKEN = process.env.VOICE_TOKEN ?? '';
+/** Set VOICE_API_URL to use the CruzClaw backend instead of the demo server. */
+const API_URL = process.env.VOICE_API_URL ?? '';
 const SHORTCUT = process.env.VOICE_SHORTCUT ?? DEFAULT_SHORTCUT;
 /** Set VOICE_DEBUG_DUMP=1 to save the last thing the microphone heard as a WAV file in the temp folder. */
 const DUMP = process.env.VOICE_DEBUG_DUMP === '1';
@@ -191,12 +194,34 @@ function log(line: string): void {
 
 /** Each connection gets a number, so a connection that was replaced cannot speak for the current one. */
 let generation = 0;
+/** Where and how to connect: the demo server, or the CruzClaw backend with a ticket for every connection. */
+let connection: ConnectionProvider | undefined;
+
+/** Reads the connection settings from the environment. Returns a message instead if they are incomplete. */
+function connectionFromEnvironment(): ConnectionProvider | string {
+  if (!API_URL) {
+    return TOKEN ? new StaticConnection(URL, TOKEN) : 'VOICE_TOKEN is not set. Start the demo server, then set VOICE_TOKEN to its bearer token.';
+  }
+  const accessToken = process.env.VOICE_ACCESS_TOKEN;
+  const email = process.env.VOICE_EMAIL;
+  const password = process.env.VOICE_PASSWORD;
+  if (!accessToken && !(email && password)) return 'Set VOICE_ACCESS_TOKEN, or VOICE_EMAIL and VOICE_PASSWORD, to sign in to the Cruz server.';
+  try {
+    return new CruzBackendConnection({
+      baseUrl: API_URL,
+      persona: { ...(process.env.VOICE_PERSONA_ID ? { id: process.env.VOICE_PERSONA_ID } : {}), ...(process.env.VOICE_PERSONA_NAME ? { name: process.env.VOICE_PERSONA_NAME } : {}) },
+      credentials: accessToken ? { accessToken } : { email: email!, password: password! },
+    });
+  } catch (e) {
+    return e instanceof ConnectionError ? e.message : 'The connection settings could not be read.';
+  }
+}
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let reconnectWait = 2000;
 
 function newClient(): VoiceClient {
   const mine = ++generation;
-  return new VoiceClient(URL, TOKEN, {
+  return new VoiceClient(connection ?? new StaticConnection(URL, TOKEN), {
     onMessage: (m) => {
       if (mine !== generation) return;
       controller.onServer(m);
@@ -226,6 +251,12 @@ async function connectOnce(): Promise<void> {
     await next.openConnection();
   } catch (e) {
     if (quitting) return;
+    // A wrong password or an account without voice will not fix itself, and retrying would only repeat the attempt.
+    if (e instanceof ConnectionError && e.fatal) {
+      log(`${e.message} Fix this and start the app again.`);
+      controller.showProblem(e.message);
+      return;
+    }
     log(`${(e as Error).message}. Retrying in ${Math.round(reconnectWait / 1000)} s.`);
     scheduleReconnect();
     return;
@@ -233,7 +264,7 @@ async function connectOnce(): Promise<void> {
   client = next;
   reconnectWait = 2000;
   controller.setConnected(true);
-  log(`connected to ${URL}. Press ${SHORTCUT} to talk.`);
+  log(`connected to ${API_URL || URL}. Press ${SHORTCUT} to talk.`);
 }
 
 function scheduleReconnect(): void {
@@ -333,11 +364,13 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('window-all-closed', () => undefined); // Lives in the tray.
   void app.whenReady().then(() => {
-    if (!TOKEN) {
-      log('VOICE_TOKEN is not set. Start the demo server, then set VOICE_TOKEN to its bearer token.');
+    const settings = connectionFromEnvironment();
+    if (typeof settings === 'string') {
+      log(settings);
       app.quit();
       return;
     }
+    connection = settings;
     // Only the hidden audio window may use the microphone.
     const isAudio = (wc: Electron.WebContents | null): boolean => !!wc && wc === audioWindow?.webContents;
     session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(permission === 'media' && isAudio(wc)));

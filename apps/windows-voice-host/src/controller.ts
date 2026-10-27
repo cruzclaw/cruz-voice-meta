@@ -287,6 +287,11 @@ export class HostController {
     this.emit();
   }
 
+  /** Shows a problem that is not part of a conversation, such as a connection that was refused. */
+  showProblem(message: string): void {
+    this.dispatch({ kind: 'ui', action: { type: 'session_failed', message } });
+  }
+
   /** Starts listening for the wake phrase. Called once a detector has loaded, so the microphone is never opened for nothing. */
   enableWake(source: WakeSource): void {
     this.wake = source;

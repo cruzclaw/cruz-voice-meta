@@ -7,6 +7,7 @@ import {
   type ClientMessage,
   type ServerMessage,
 } from '@cruzclaw/voice-core';
+import type { ConnectionProvider } from './connection.js';
 
 export const HOST_AUDIO: AudioFormat = { encoding: 'pcm_s16le', sampleRate: 24000, channels: 1 };
 
@@ -21,7 +22,8 @@ export interface VoiceClientHandlers {
 /**
  * One connection to a voice server, carrying one voice session at a time.
  * Runs in the Electron main process because a browser WebSocket cannot set the
- * Authorization header the server requires. The token is only ever sent in that header.
+ * Authorization header the demo server requires. Where and how to connect, including any
+ * credential, comes from the ConnectionProvider, which is asked again for every connection.
  *
  * Opening the connection (which checks the token) is separate from starting the
  * session, because the server speaks its greeting the moment a session starts.
@@ -33,8 +35,7 @@ export class VoiceClient {
   private closedReported = false;
 
   constructor(
-    private readonly url: string,
-    private readonly token: string,
+    private readonly provider: ConnectionProvider,
     private readonly handlers: VoiceClientHandlers,
   ) {}
 
@@ -43,9 +44,12 @@ export class VoiceClient {
   }
 
   /** Resolves when the socket is open and the token was accepted. */
-  openConnection(timeoutMs = 10000): Promise<void> {
+  async openConnection(timeoutMs = 10000): Promise<void> {
+    // Asked for every connection: a ticket works once, so a reconnect needs a new one.
+    const target = await this.provider.resolve();
+
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(this.url, { headers: { Authorization: `Bearer ${this.token}` } });
+      const ws = new WebSocket(target.url, { headers: target.headers });
       this.ws = ws;
       let opened = false;
       let settled = false;
@@ -68,7 +72,7 @@ export class VoiceClient {
         clearTimeout(timer);
         resolve();
       });
-      ws.on('unexpected-response', (_req, res) => fail(`The voice server refused the connection (HTTP ${res.statusCode})`));
+      ws.on('unexpected-response', (_req, res) => fail(refusalFor(res.statusCode)));
       ws.on('error', () => fail('Could not reach the voice server'));
       ws.on('close', () => fail('The voice server closed the connection'));
       ws.on('message', (data, isBinary) => this.onData(data as Buffer, isBinary));
@@ -133,4 +137,12 @@ export class VoiceClient {
     this.waiting?.reject(new Error(reason));
     this.handlers.onClose(reason);
   }
+}
+
+/** Says why a connection was refused, in words for the person. A refusal to open is about who is asking, so retrying unchanged will not help. */
+function refusalFor(status: number | undefined): string {
+  if (status === 401) return 'The voice server did not accept the sign-in or ticket (HTTP 401)';
+  if (status === 403) return 'The voice server refused the connection (HTTP 403): voice may not be turned on for this account';
+  if (status === 429) return 'The voice server is busy with too many sessions (HTTP 429)';
+  return `The voice server refused the connection (HTTP ${status})`;
 }
