@@ -22,6 +22,7 @@ jobs:
       - run: npm test
       - run: npm run build -w @cruzclaw/voice-core
       - run: npm run build -w @cruzclaw/voice-server
+      - run: npm run build -w @cruzclaw/tts-kokoro
 
   audit:
     runs-on: ubuntu-latest
