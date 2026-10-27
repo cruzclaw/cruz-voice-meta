@@ -16,7 +16,7 @@ Real providers plug in behind three small interfaces in `src/ports.ts`:
 | Port | Demo stand-in | Real provider |
 | --- | --- | --- |
 | `Transcriber` | `ScriptedTranscriber` returns scripted phrases | `MetaTranscriber`: Meta Muse Voice Transcribe over its realtime endpoint, used when `MODEL_API_KEY` is set (CRU-663) |
-| `Reasoner` | `RuleReasoner` | Meta Muse Spark (CRU-664) |
+| `Reasoner` | `RuleReasoner` | `MetaReasoner`: Meta Muse Spark over the Responses API, streamed, used when `MODEL_API_KEY` is set (CRU-664) |
 | `Synthesizer` | `ToneSynthesizer` plays a quiet tone | `KokoroSynthesizer` from `packages/tts-kokoro`: local Kokoro-82M, no key, 24 kHz (CRU-665) |
 
 Meta offers speech to text and reasoning but no text to speech, so speech output is a non-Meta, open-weight model that runs locally. A hosted voice can replace it later behind the same port. The mock transcriber cannot understand audio, so it ignores what you say and answers with the next scripted phrase. Do not mistake it for recognition.
@@ -46,3 +46,11 @@ Meta offers speech to text and reasoning but no text to speech, so speech output
 ## Why Kokoro is its own package
 
 `@cruzclaw/tts-kokoro` pulls in `@huggingface/transformers`, which depends on `sharp`. `npm audit` reports high-severity advisories in `sharp`'s image libraries (libvips, libheif, librsvg) with no fix available. Speech synthesis never decodes images, so the code is not reached, but the advisories are real. The package is isolated so that CI gates every other package and only reports on this one. Re-check when `sharp` is fixed. The demo server loads it on demand and is not allowed to depend on it directly.
+
+## How reasoning is called
+
+- `muse-spark-1.3` with `reasoning.effort` set to `minimal`. At the API default one simple request took about 10 seconds. At `minimal` replies start in about 1 to 3 seconds.
+- No `max_output_tokens`: reasoning tokens count against it, and a low cap returned no answer at all.
+- The model can only call `propose_task` (send an email or save a note). Email details are validated in code, and the wording the owner hears for approval is built from the checked fields, never from model text.
+- The model is told it cannot cancel or change a proposed task and must point to the cancel control.
+- The last 10 turns of a conversation are kept in memory per conversation, and are lost on restart.

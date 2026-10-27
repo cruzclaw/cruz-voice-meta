@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { MetaReasoner } from './meta-reasoner.js';
 import { MetaTranscriber } from './meta-transcriber.js';
 import { RuleReasoner, ScriptedTranscriber, ToneSynthesizer } from './mock-providers.js';
-import type { Synthesizer, Transcriber } from './ports.js';
+import type { Reasoner, Synthesizer, Transcriber } from './ports.js';
 import { createDemoServer } from './server.js';
 
 // Optional local secrets file next to this app. It is git-ignored; never commit it.
@@ -14,10 +15,15 @@ const token = process.env.DEMO_TOKEN ?? randomBytes(16).toString('hex');
 const apiKey = process.env.MODEL_API_KEY?.trim();
 
 let transcriber: Transcriber;
+let reasoner: Reasoner;
 if (apiKey) {
   transcriber = new MetaTranscriber({ apiKey });
+  reasoner = new MetaReasoner({ apiKey });
   console.log('speech to text: Meta Muse Voice Transcribe (live)');
+  console.log('reasoning: Meta Muse Spark (live)');
 } else {
+  reasoner = new RuleReasoner();
+  console.log('reasoning: MOCK rules (email, note, status). Set MODEL_API_KEY for Muse Spark.');
   transcriber = new ScriptedTranscriber(['Please draft an email to Maria', 'What is my status', 'Remind me to call the bank']);
   console.log('speech to text: MOCK. It ignores your voice and returns scripted phrases. Set MODEL_API_KEY for real recognition.');
 }
@@ -39,10 +45,10 @@ if (process.env.TTS !== 'tone') {
   console.log('text to speech: tone only (TTS=tone)');
 }
 
-/** Loopback only. Mock reasoning until its adapter is added. */
+/** Loopback only. */
 const demo = createDemoServer({
   accounts: [{ token, tenantKey: 'demo', features: { voiceEnabled: true } }],
-  providers: { transcriber, reasoner: new RuleReasoner(), synthesizer },
+  providers: { transcriber, reasoner, synthesizer },
   killSwitch: process.env.VOICE_FEATURE_DISABLED === 'true',
 });
 
