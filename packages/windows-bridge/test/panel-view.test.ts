@@ -48,7 +48,10 @@ describe('what the panel says when a call cannot start', () => {
   });
 
   it('gives each blocked state its own short caption', () => {
-    assert.equal(caption(r('voice_disabled'), 'disconnected', 'Not connected', 'Tesla'), 'Voice not enabled');
+    assert.equal(caption(r('voice_disabled'), 'disconnected', 'Not connected', 'Tesla'), 'Tesla · Voice not enabled');
+    assert.equal(caption(r('voice_disabled'), 'disconnected', 'Not connected', undefined), 'Voice not enabled');
+    assert.equal(caption(r('checking'), 'disconnected', 'Not connected', 'Tesla'), 'Tesla · Checking…');
+    assert.equal(caption(r('checking'), 'disconnected', 'Not connected', undefined), 'Checking…');
     assert.equal(caption(r('no_employee'), 'disconnected', 'Not connected', undefined), 'Choose employee');
     assert.equal(caption(r('connection_failed'), 'disconnected', 'Not connected', 'Tesla'), 'Tesla · Cannot connect');
   });

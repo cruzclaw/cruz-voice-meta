@@ -67,10 +67,11 @@ export function emptyText(r: Readiness, shortcut: string): string {
 export function caption(r: Readiness, display: DisplayState, stateText: string, employeeName: string | undefined): string {
   const who = employeeName ? `${employeeName} · ` : '';
   switch (r.state) {
+    // The chosen employee stays in the words in every state that has one, so it never reads as if nobody is chosen.
     case 'checking':
-      return 'Checking…';
+      return `${who}Checking…`;
     case 'voice_disabled':
-      return 'Voice not enabled';
+      return `${who}Voice not enabled`;
     case 'no_employee':
       return 'Choose employee';
     case 'no_employees':

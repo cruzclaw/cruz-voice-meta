@@ -282,6 +282,18 @@ app.whenReady().then(async () => {
   }
   check(resolves2 === 0, 'none of those presses connected to anything');
 
+  // 14b. The chosen employee stays on the pad whatever the readiness says.
+  host2.setEmployees([TESLA, OPS], TESLA.id);
+  for (const [state, words] of [['voice_disabled', 'Tesla · Voice not enabled'], ['checking', 'Tesla · Checking…']]) {
+    host2.setReadiness({ state });
+    await click2('minimize');
+    await wait(400);
+    check((await text('mini-caption')) === words, `${state}: the small pad still names the employee (${await text('mini-caption')})`);
+    check((await text('title')) === 'Tesla', `${state}: and the panel title does too`);
+    await click2('expand');
+    await wait(300);
+  }
+
   // 15. A connection that keeps failing is said plainly, and is not confused with the other reasons.
   host2.setEmployees([TESLA, OPS], TESLA.id);
   host2.setReadiness({ state: 'ready' });
