@@ -63,7 +63,7 @@ export const COMPACT_SIZE = { width: COMPACT_WIDTH, height: COMPACT_HEIGHT } as 
 
 /** The minimised bar is this fraction of the panel's height, but never too thin to hold its buttons. */
 export const MINI_HEIGHT_RATIO = 0.1;
-export const MINI_MIN_HEIGHT = 32;
+export const MINI_MIN_HEIGHT = 36;
 /** Gap between the minimised bar and the taskbar. */
 export const MINI_MARGIN = 4;
 

@@ -383,16 +383,16 @@ describe('minimised bar placement', () => {
   const second: DisplayInfo = { id: 2, workArea: { x: 1920, y: 0, width: 1920, height: 1080 } };
   const full = { x: 1500, y: 600, width: 342, height: 330 };
 
-  it('is a tenth of the height, the same width and left edge, resting just above the taskbar', () => {
+  it('is as tall as its buttons and the 4 px strip need, the same width and left edge, resting just above the taskbar', () => {
     const mini = miniBounds([taskbarBottom], full, 330);
-    assert.equal(mini.height, 33);
+    assert.equal(mini.height, 36);
     assert.equal(mini.width, 342);
     assert.equal(mini.x, 1500);
     assert.equal(mini.y + mini.height, 1040 - 4, 'bottom edge is 4 px above the taskbar');
   });
 
   it('never goes thinner than its buttons need, and stays on a display where the window is', () => {
-    assert.equal(miniBounds([taskbarBottom], full, 200).height, 32);
+    assert.equal(miniBounds([taskbarBottom], full, 200).height, 36);
     const onSecond = miniBounds([taskbarBottom, second], { ...full, x: 2400 }, 330);
     assert.equal(onSecond.y + onSecond.height, 1080 - 4);
     assert.equal(onSecond.x, 2400);
@@ -413,7 +413,7 @@ describe('minimised bar placement', () => {
   });
 
   it('with no display information it keeps the size and does not throw', () => {
-    assert.deepEqual(miniBounds([], full, 330), { ...full, height: 33 });
-    assert.equal(expandedBounds([], { x: 5, y: 900, width: 342, height: 33 }, { width: 342, height: 330 }).height, 330);
+    assert.deepEqual(miniBounds([], full, 330), { ...full, height: 36 });
+    assert.equal(expandedBounds([], { x: 5, y: 900, width: 342, height: 36 }, { width: 342, height: 330 }).height, 330);
   });
 });

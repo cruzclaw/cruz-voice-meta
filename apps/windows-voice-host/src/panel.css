@@ -202,7 +202,10 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 }
 
 /* ---- Minimised: a thin bar above the taskbar with the state, Mute and Call or Hang up ---- */
-.mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 0 6px 0 10px; }
+/* The top 4px belong to the attention strip, so the bar's own content starts below it and never overlaps it. */
+.mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 4px 6px 0 10px; }
+/* Small bar: the strip stays crisp, with no glow spilling onto the buttons and words under it. */
+body.is-mini .seg { box-shadow: none; }
 body.is-mini { border-radius: 8px; }
 body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag, body.is-mini .attn-chip { display: none; }
 body.is-mini .mini { display: flex; }
@@ -234,3 +237,39 @@ body.is-mini .mini { display: flex; }
 .mini-call .icon-hangup { display: none; }
 .mini-call[data-mode="hangup"] .icon-call { display: none; }
 .mini-call[data-mode="hangup"] .icon-hangup { display: block; }
+
+/* ---- Who the voice is for, and what the microphone is doing ---- */
+.title { max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.link-btn {
+  position: absolute; left: 12px; top: 8px; font-size: 11px; color: var(--muted);
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: #fff;
+}
+.link-btn:hover { background: #f4f6f9; color: var(--fg); }
+.link-btn[hidden] { display: none; }
+
+/* Three states, always with words, so colour is never the only signal. */
+.mic { margin: 4px 0 0; padding: 1px 9px; font-size: 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.mic[data-mic="listening"], .mini-mic[data-mic="listening"] { color: #b4442f; border-color: #f2b6a8; background: #fff4f1; }
+.mic[data-mic="wake"], .mini-mic[data-mic="wake"] { color: #2f4fb0; border-color: #c5d0f5; background: #f3f6ff; }
+.mini-mic {
+  flex: none; font-size: 10px; line-height: 1; padding: 3px 6px; border-radius: 999px; border: 1px solid var(--line);
+  color: var(--muted); white-space: nowrap;
+}
+
+.choose { width: 100%; margin-top: 8px; }
+.choose[hidden] { display: none; }
+.choose-heading { margin: 0 0 6px; font-size: 12px; color: var(--muted); text-align: center; }
+.choose-list { display: flex; flex-direction: column; gap: 6px; max-height: 118px; overflow-y: auto; scrollbar-width: thin; }
+.choice {
+  width: 100%; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff;
+  font-size: 13px; text-align: left; color: var(--fg);
+}
+.choice:hover { background: #f4f6f9; }
+.choice[aria-checked="true"] { border-color: #1f9d63; background: #f1faf5; font-weight: 600; }
+.choice[aria-checked="true"]::after { content: " ✓"; color: #1f9d63; }
+.mini-choose {
+  flex: none; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
+  border: 1px solid #1f9d63; background: #1f9d63; color: #fff;
+}
+.mini-choose[hidden] { display: none; }
+.mini-call:disabled { opacity: 0.4; cursor: default; }

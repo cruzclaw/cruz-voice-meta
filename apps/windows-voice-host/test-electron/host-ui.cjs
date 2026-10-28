@@ -27,6 +27,9 @@ for (const method of ['show', 'focus', 'moveTop', 'setAlwaysOnTop']) {
   };
 }
 
+// The first host is disposed before the second is made, and Electron quits when its last window closes.
+app.on('window-all-closed', () => {});
+
 app.whenReady().then(async () => {
   console.log(`display scale factor ${screen.getPrimaryDisplay().scaleFactor}`);
   let resolves = 0;
@@ -71,7 +74,8 @@ app.whenReady().then(async () => {
   const full = win().getBounds();
   check(full.width === bar.width, `the expanded panel is as wide as the bar (${full.width} = ${bar.width})`);
   check(full.x === bar.x, `and has the same left edge (${full.x} = ${bar.x})`);
-  check(Math.abs(full.y + full.height - (bar.y + bar.height)) <= 1, `and grows upward from the bar, keeping its bottom edge, within a pixel of rounding (${full.y}+${full.height} vs ${bar.y}+${bar.height})`);
+  // Electron rounds window sizes to whole physical pixels, which at 125% shifts a bottom edge by up to two device-independent pixels.
+  check(Math.abs(full.y + full.height - (bar.y + bar.height)) <= 2, `and grows upward from the bar, keeping its bottom edge, within the display's own pixel rounding (${full.y}+${full.height} vs ${bar.y}+${bar.height})`);
   check(await hueVisible(), 'the strip is still there in the expanded panel');
   check(!win().isFocused(), 'expanding does not make it take focus from other apps');
 
@@ -106,28 +110,32 @@ app.whenReady().then(async () => {
     check(win().getBounds().width === full.width, `minimised ${kind}: width unchanged`);
   }
 
-  // 5. Closing with something waiting leaves the bar. With nothing waiting it hides.
+  // 5. Closing is the person's act. It hides the panel for the session, whatever is waiting, and nothing brings it back.
   await click('expand');
   await wait(400);
   await click('close');
   await wait(400);
-  check(win().isVisible() && host.describe().mini, 'closing with something waiting leaves the small bar, so the strip is not taken away');
-  check(win().getBounds().width === full.width && win().getBounds().x === full.x, 'at the same width and left edge');
-  host.setAttention(counts({}));
-  await wait(400);
-  check(!(await hueVisible()), 'with nothing waiting the strip is gone');
-  check(!win().isVisible(), 'and the bar that was only there for it goes away with it');
-
-  // 5b. Something arrives again after the panel was hidden: the bar comes back, silently, at the same place.
+  check(!win().isVisible(), 'closing hides the panel completely, even with something waiting');
   host.setAttention(counts({ error: 1 }));
   await wait(600);
-  check(win().isVisible() && host.describe().mini, 'a later arrival brings the small bar back');
+  check(!win().isVisible(), 'and something arriving afterwards does not bring it back');
+  host.setAttention(counts({}));
+  await wait(300);
+  host.setAttention(counts({ error: 1 }));
+  await wait(600);
+  check(!win().isVisible(), 'nor does clearing and arriving again');
+
+  // 5b. The shortcut, the tray or the app bring it back, as the small bar, at the same place and width.
+  host.showBar();
+  await wait(600);
+  check(win().isVisible() && host.describe().mini, 'showBar brings the small bar back');
   const again = win().getBounds();
   check(again.width === full.width && again.x === full.x, 'at the same width and left edge as before');
   s = await strip();
-  check(s.length === 1 && s[0].kind === 'error' && s[0].color === COLORS.error, 'in red for an error');
+  check(s.length === 1 && s[0].kind === 'error' && s[0].color === COLORS.error, 'with the strip in red for the error that is waiting');
   host.setAttention(counts({}));
   await wait(400);
+  check(win().isVisible(), 'and clearing what is waiting does not hide a bar the person has not closed');
 
   // 6. Arrivals never move or resize a panel the person has open.
   await click('expand');
@@ -164,10 +172,195 @@ app.whenReady().then(async () => {
   await wait(5000);
   check(resolves === triesAtSignOut, `and it does not try to reconnect by itself (${resolves} tries, ${triesAtSignOut} at sign-out)`);
   host.hangUp();
+  host.dispose();
+  focusGrabs.length = 0;
+
+  // ================= Part 2: the pad on a normal start, the employee, what it says, the microphone =================
+  const chosen = [];
+  let resolves2 = 0;
+  const lines2 = [];
+  const host2 = createVoiceHost({
+    connection: { resolve: async () => { resolves2 += 1; throw new Error('offline'); } },
+    assetsDir: dist,
+    deviceSpeech: false,
+    shortcutLabel: 'Ctrl+Shift+Space',
+    onEmployeeChoose: (id) => chosen.push(id),
+    log: (line) => lines2.push(line),
+  });
+  const win2 = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Cruz');
+  const dom2 = (code) => win2().webContents.executeJavaScript(code);
+  const text = (id) => dom2(`document.getElementById('${id}').textContent`);
+  const shown = (id) => dom2(`(() => { const e = document.getElementById('${id}'); return !e.hidden && e.getBoundingClientRect().height > 0 && getComputedStyle(e).display !== 'none'; })()`);
+  const disabled = () => dom2(`Array.from(document.querySelectorAll('.js-call')).every((b) => b.disabled)`);
+  const click2 = (id) => dom2(`document.getElementById('${id}').click()`);
+  const TESLA = { id: 'p-tesla', name: 'Tesla' };
+  const OPS = { id: 'p-ops', name: 'Versal Ops' };
+
+  // 9. An ordinary start: the pad appears, silently, and turns nothing on.
+  host2.showBar();
+  await wait(1500);
+  check(!!win2() && win2().isVisible() && host2.describe().mini, 'on a normal start the small pad appears');
+  check(!win2().isFocused() && focusGrabs.length === 0, 'without taking focus');
+  check(BrowserWindow.getAllWindows().length === 1, 'and it is the only window: no microphone is opened');
+  check(resolves2 === 0, 'it connects to nothing and starts no call');
+  check((await text('mini-mic')) === 'Mic off', 'the microphone reads Mic off');
+  check(host2.describe().visible, 'and it is visible');
+
+  // 10. Before the account answers, nothing can be called.
+  host2.setReadiness({ state: 'checking' });
+  await wait(300);
+  check((await text('mini-caption')) === 'Checking…' && (await disabled()), 'while checking, the pad says so and Call is not available');
+
+  // 11. No employee chosen: the pad offers the choice itself.
+  host2.setEmployees([TESLA, OPS], undefined);
+  host2.setReadiness({ state: 'no_employee' });
+  await wait(300);
+  check((await text('mini-caption')) === 'Choose employee', 'with none chosen, the pad says Choose employee');
+  check(await shown('mini-choose'), 'and offers a Choose button on the small pad');
+  check(await disabled(), 'Call is not available');
+  host2.press();
+  await wait(700);
+  check(resolves2 === 0, 'pressing the shortcut with no employee connects to nothing');
+  check(host2.describe().visible && !host2.describe().mini, 'but it opens the full panel, so the reason is on screen');
+  check(await shown('choose'), 'where the employees are listed to choose from');
+  const names = await dom2(`Array.from(document.querySelectorAll('#choose-list .choice')).map((b) => b.textContent)`);
+  check(JSON.stringify(names) === JSON.stringify(['Tesla', 'Versal Ops']), `listing every eligible employee (${names.join(', ')})`);
+  check(/Choose which employee/.test(await text('log')), 'and the words in the panel say Choose which employee to talk to');
+  check(!/tray|menu/i.test(await dom2(`document.body.innerText`)), 'without sending the person to a tray menu');
+
+  // 12. Choosing hands the choice to the app. Choosing alone opens nothing.
+  await dom2(`document.querySelectorAll('#choose-list .choice')[0].click()`);
+  await wait(300);
+  check(chosen.join() === TESLA.id, 'choosing an employee tells the app which one');
+  check(BrowserWindow.getAllWindows().length === 1 && resolves2 === 0, 'and by itself opens no microphone and makes no connection');
+  host2.setEmployees([TESLA, OPS], TESLA.id);
+  host2.setReadiness({ state: 'ready' });
+  await wait(300);
+  check((await text('title')) === 'Tesla', 'the chosen employee is named on the expanded panel');
+  check((await text('caption')) === 'Tesla · Ready', `and in its caption (${await text('caption')})`);
+  check(!(await shown('choose')) && (await shown('change-employee')), 'the list closes, and Change stays available');
+  check(!(await disabled()), 'Call is available now');
+  check((await text('mic')) === 'Mic off', 'the microphone still reads Mic off after choosing');
+  await click2('minimize');
+  await wait(500);
+  check((await text('mini-caption')) === 'Tesla · Ready', 'the small pad shows the employee too');
+
+  // 13. Changing the choice later.
+  await click2('expand');
+  await wait(400);
+  await click2('change-employee');
+  await wait(300);
+  check(await shown('choose'), 'Change opens the list');
+  const marked = await dom2(`Array.from(document.querySelectorAll('#choose-list .choice')).filter((b) => b.getAttribute('aria-checked') === 'true').map((b) => b.textContent)`);
+  check(marked.join() === 'Tesla', 'with the current employee marked');
+  await dom2(`document.querySelectorAll('#choose-list .choice')[1].click()`);
+  await wait(200);
+  check(chosen.join() === `${TESLA.id},${OPS.id}`, 'and the new choice reaches the app');
+  host2.setEmployees([TESLA, OPS], OPS.id);
+  await wait(300);
+  check((await text('title')) === 'Versal Ops', 'the panel follows the app and shows the new employee');
+  host2.setEmployees([TESLA, OPS], 'someone-removed');
+  host2.setReadiness({ state: 'no_employee' });
+  await wait(300);
+  check((await text('title')) === 'Cruz' && (await shown('choose')), 'a chosen employee who is no longer on the account is not shown, and the list opens again');
+
+  // 14. Why a call is not available: each reason in its own words, naming only controls that exist.
+  const reasons = [
+    ['voice_disabled', 'Voice not enabled', /not turned on/],
+    ['no_employees', 'No employee', /no employee to talk to/],
+    ['signed_out', 'Signed out', /Sign in to CruzClaw/],
+  ];
+  for (const [state, cap, words] of reasons) {
+    host2.setReadiness({ state });
+    await wait(300);
+    check((await text('caption')) === cap, `${state}: the caption is ${cap}`);
+    check(words.test(await text('log')), `${state}: the panel explains it`);
+    check(await disabled(), `${state}: Call is not available`);
+    check(!/Press Call|Ctrl\+Shift/.test(await text('log')), `${state}: the panel does not tell the person to press Call`);
+    host2.press();
+    await wait(400);
+  }
+  check(resolves2 === 0, 'none of those presses connected to anything');
+
+  // 14b. The chosen employee stays on the pad whatever the readiness says.
+  host2.setEmployees([TESLA, OPS], TESLA.id);
+  for (const [state, words] of [['voice_disabled', 'Tesla · Voice not enabled'], ['checking', 'Tesla · Checking…']]) {
+    host2.setReadiness({ state });
+    await click2('minimize');
+    await wait(400);
+    check((await text('mini-caption')) === words, `${state}: the small pad still names the employee (${await text('mini-caption')})`);
+    check((await text('title')) === 'Tesla', `${state}: and the panel title does too`);
+    await click2('expand');
+    await wait(300);
+  }
+
+  // 15. A connection that keeps failing is said plainly, and is not confused with the other reasons.
+  host2.setEmployees([TESLA, OPS], TESLA.id);
+  host2.setReadiness({ state: 'ready' });
+  await wait(200);
+  host2.press();
+  await wait(1500);
+  check(resolves2 >= 1, 'with an employee chosen and voice on, a press does try to connect');
+  check(host2.readiness.state === 'connection_failed', `a failing connection is reported as such (${host2.readiness.state})`);
+  check((await text('caption')) === 'Tesla · Cannot connect' && /Cannot reach CruzClaw/.test(await text('log')), 'in the caption and the words');
+  host2.setReadiness({ state: 'voice_disabled' });
+  await wait(300);
+  check(host2.readiness.state === 'voice_disabled', 'while an account without voice is never reported as a connection failure');
+  host2.setReadiness({ state: 'ready' });
+  host2.hangUp();
+
+  // 16. The wake phrase is shown as its own microphone state.
+  // Wake listening needs a connected, idle, unmuted conversation.
+  host2.controller.setConnected(true);
+  host2.controller.enableWake({ feed: () => {}, reset: () => {} });
+  host2.setReadiness({ state: 'ready' });
+  await wait(300);
+  check((await text('mic')) === 'Wake listening', 'with the wake phrase on, the microphone reads Wake listening');
+  host2.controller.disableWake();
+  host2.setReadiness({ state: 'ready' });
+  await wait(300);
+  check((await text('mic')) === 'Mic off', 'and Mic off when it is turned off');
+  host2.controller.setConnected(false);
+
+  // 17. Closing dismisses the pad for the session. The shortcut brings it back. A restart starts it again.
+  await click2('close');
+  await wait(400);
+  check(!win2().isVisible(), 'closing hides the pad');
+  host2.setAttention(counts({ update: 1 }));
+  await wait(500);
+  check(!win2().isVisible(), 'something waiting does not bring it back');
+  host2.press();
+  await wait(700);
+  check(win2().isVisible(), 'the shortcut brings it back');
+  await click2('close');
+  await wait(300);
+  host2.showPanel();
+  await wait(500);
+  check(win2().isVisible() && !host2.describe().mini, 'so does the tray (showPanel), as the full panel');
+  await click2('minimize');
+  await wait(400);
+  await click2('close');
+  await wait(300);
+  host2.showBar();
+  await wait(500);
+  check(win2().isVisible() && host2.describe().mini, 'and showBar, as the small pad again');
+
+  // 18. Ending a session for a changed employee leaves the pad where it was and clears the conversation.
+  // After a hang-up the controller only accepts the utterance it expects next, which is named 'interrupted'.
+  host2.controller.onServer({ v: 1, seq: 1, type: 'transcript.final', utteranceId: 'interrupted', text: 'hello' }, true);
+  host2.controller.onServer({ v: 1, seq: 2, type: 'assistant.text.delta', turnId: 't9', text: 'A thing the first employee said.' }, true);
+  await wait(300);
+  await click2('expand');
+  await wait(400);
+  check(/first employee said/.test(await text('log')), 'a conversation is on the panel');
+  host2.endSession('employee_changed');
+  await wait(400);
+  check(!/first employee said/.test(await text('log')), 'ending the session for a different employee clears it');
+  check(lines2.some((l) => /employee changed/.test(l)) && win2().isVisible(), 'and says why, and the pad stays');
+  host2.dispose();
   focusGrabs.length = 0;
 
   check(focusGrabs.length === 0, `nothing in this whole run asked the system to focus or raise a window (${focusGrabs.join(', ') || 'no calls'})`);
   console.log(failures === 0 ? 'ALL PASSED' : `${failures} FAILED`);
-  host.dispose();
   app.exit(failures === 0 ? 0 : 1);
 });

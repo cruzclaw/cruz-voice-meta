@@ -10,7 +10,8 @@
     <!-- The silent attention strip. It stays at the very top in both the full panel and the minimised bar. -->
     <div id="hue" class="hue" role="img" hidden></div>
     <header>
-      <span class="title">Cruz</span>
+      <span id="title" class="title">Cruz</span>
+      <button id="change-employee" class="link-btn" type="button" hidden>Change</button>
       <button id="minimize" class="head-btn head-min" title="Minimise" aria-label="Minimise">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
       </button>
@@ -32,6 +33,11 @@
         <span class="core"><span class="swirl"></span><span class="shine"></span></span>
       </div>
       <p id="caption" class="caption" role="status" aria-live="polite">Starting</p>
+      <p id="mic" class="mic" data-mic="off">Mic off</p>
+      <section id="choose" class="choose" aria-label="Choose an employee" hidden>
+        <p id="choose-heading" class="choose-heading">Choose an employee</p>
+        <div id="choose-list" class="choose-list" role="radiogroup"></div>
+      </section>
 
       <section id="scroll" class="scroll" tabindex="0" aria-label="Conversation">
         <div id="log" class="log"></div>
@@ -60,7 +66,9 @@
       <span class="mini-drag">
         <span id="mini-dot" class="mini-dot" data-state="disconnected"></span>
         <span id="mini-caption" class="mini-caption">Starting</span>
+        <span id="mini-mic" class="mini-mic" data-mic="off">Mic off</span>
       </span>
+      <button id="mini-choose" class="mini-choose" type="button" hidden>Choose</button>
       <button class="mini-btn js-mute" aria-pressed="false" aria-label="Mute microphone" title="Mute microphone">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="9" y="3" width="6" height="11" rx="3" />
