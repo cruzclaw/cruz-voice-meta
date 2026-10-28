@@ -190,6 +190,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   let stopsSent = 0;
   /** When the first chunk of the current burst was handed to the speaker, for measuring how long sound takes to begin. */
   let handedOverAt = 0;
+  /** When the person stopped speaking (the end of their turn was sent), until the first sound of the reply is heard. */
+  let inputEndedAt = 0;
 
   // ---- the device voice, in its own process ----
 
@@ -264,7 +266,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
 
   const controller = new HostController(
     {
-      send: (message) => client?.send(message),
+      send: (message) => {
+        if (message.type === 'input.end') inputEndedAt = Date.now();
+        client?.send(message);
+      },
       sendMic: (pcm) => client?.sendMic(pcm),
       startSession: (fresh, mode) => startSession(fresh, mode),
     },
@@ -601,7 +606,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   on('playback-started', (event, stops: unknown) => {
     // Sound has begun in the audio window. A report from before the last stop belongs to a reply that was cut off.
     if (!fromAudio(event) || stops !== stopsSent) return;
-    log(`speaker: sound began ${Date.now() - handedOverAt} ms after the first chunk was handed over`);
+    const now = Date.now();
+    log(`speaker: sound began ${now - handedOverAt} ms after the first chunk was handed over`);
+    // The one number that matters to the person: from the end of what they said to the first sound they hear.
+    if (inputEndedAt) log(`latency: first sound ${now - inputEndedAt} ms after the end of speech`);
+    inputEndedAt = 0;
     controller.onPlaybackStarted();
   });
   on('audio-ready', (event) => {
