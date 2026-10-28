@@ -24,6 +24,7 @@ import {
 import { VoiceClient } from './client.js';
 import { ConnectionError, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
+import { PendingPress } from './pending-press.js';
 import { SpeechClient, type SpeechChild } from './speech-client.js';
 
 /** The words for each state, for a tray tooltip or a log line. */
@@ -60,6 +61,8 @@ export interface VoiceHostOptions {
    * folder the app can write to, such as one under the user's app data. Defaults to the package's own folder.
    */
   modelCacheDir?: string;
+  /** How long a press made before the connection was up stays valid. After this it is forgotten. Defaults to 15 s. */
+  pressWindowMs?: number;
   /** Save the last thing the microphone heard as a WAV file in the temp folder. */
   debugDump?: boolean;
   log?: (line: string) => void;
@@ -136,8 +139,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   /** The panel is wanted before its page has loaded: show it, and as the bar or the full panel, as soon as it can. */
   let pendingShow = false;
   let pendingBar = false;
-  /** The person asked for a call before the connection was up. It starts as soon as it is. */
-  let pendingPress = false;
+  /** The person asked for a call before the connection was up. It starts as soon as it is, if still fresh. */
+  const pendingPress = new PendingPress(options.pressWindowMs ?? 15000);
 
   /** Chunks handed to the speaker since playback last stopped, and whether any may still be audible. */
   let chunksSent = 0;
@@ -412,7 +415,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       // A wrong password or an account without voice will not fix itself, and retrying would only repeat the attempt.
       if (e instanceof ConnectionError && e.fatal) {
         log(`${e.message} Fix this and start the app again.`);
-        pendingPress = false;
+        pendingPress.clear();
         controller.showProblem(e.message);
         options.onProblem?.(e.message);
         return;
@@ -425,10 +428,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     reconnectWait = 2000;
     controller.setConnected(true);
     log('connected');
-    if (pendingPress) {
-      pendingPress = false;
-      controller.press();
-    }
+    if (pendingPress.take()) controller.press();
   }
 
   function scheduleReconnect(): void {
@@ -562,7 +562,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (controller.state.phase === 'speaking') panel?.webContents.send('panel-level', level);
   });
   on('panel-talk', (event) => void (fromPanel(event) && controller.press()));
-  on('panel-hangup', (event) => void (fromPanel(event) && controller.hangUp()));
+  on('panel-hangup', (event) => {
+    if (!fromPanel(event)) return;
+    pendingPress.clear();
+    controller.hangUp();
+  });
   on('panel-mute', (event) => void (fromPanel(event) && controller.toggleMute()));
   on('panel-minimize', (event) => void (fromPanel(event) && (shownForAttention = false, setMini(true))));
   on('panel-expand', (event) => void (fromPanel(event) && (shownForAttention = false, setMini(false))));
@@ -586,13 +590,16 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       showPanelSilently();
       // Not connected yet: connect now, and start the call when it is. Nothing connects before the first press.
       if (!controller.state.connected) {
-        pendingPress = true;
+        pendingPress.request();
         void connectOnce();
         return;
       }
       controller.press();
     },
-    hangUp: () => controller.hangUp(),
+    hangUp: () => {
+      pendingPress.clear();
+      controller.hangUp();
+    },
     toggleMute: () => controller.toggleMute(),
     showPanel: () => {
       shownForAttention = false;
