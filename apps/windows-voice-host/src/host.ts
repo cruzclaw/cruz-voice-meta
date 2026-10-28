@@ -188,6 +188,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   let speakerBusy = false;
   /** Stops sent to the audio window since it opened. Its reports carry its own count, so a stale one is told apart. */
   let stopsSent = 0;
+  /** When the first chunk of the current burst was handed to the speaker, for measuring how long sound takes to begin. */
+  let handedOverAt = 0;
 
   // ---- the device voice, in its own process ----
 
@@ -243,6 +245,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     startCapture: () => toAudio(needAudio(), 'capture', true),
     stopCapture: () => toAudio(audioIfOpen(), 'capture', false),
     play: (pcm) => {
+      if (!speakerBusy) handedOverAt = Date.now();
       chunksSent++;
       speakerBusy = true;
       toAudio(needAudio(), 'play', pcm);
@@ -598,6 +601,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   on('playback-started', (event, stops: unknown) => {
     // Sound has begun in the audio window. A report from before the last stop belongs to a reply that was cut off.
     if (!fromAudio(event) || stops !== stopsSent) return;
+    log(`speaker: sound began ${Date.now() - handedOverAt} ms after the first chunk was handed over`);
     controller.onPlaybackStarted();
   });
   on('audio-ready', (event) => {
