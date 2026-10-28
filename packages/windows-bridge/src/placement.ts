@@ -53,6 +53,14 @@ export function placePanel(
   return display ? defaultBounds(display, size) : undefined;
 }
 
+/**
+ * The full panel and the minimised bar are exactly this wide and share a left edge. Both sizes come from
+ * this one number, so they cannot drift apart. Expanding changes the height only.
+ */
+export const COMPACT_WIDTH = 342;
+export const COMPACT_HEIGHT = 330;
+export const COMPACT_SIZE = { width: COMPACT_WIDTH, height: COMPACT_HEIGHT } as const;
+
 /** The minimised bar is this fraction of the panel's height, but never too thin to hold its buttons. */
 export const MINI_HEIGHT_RATIO = 0.1;
 export const MINI_MIN_HEIGHT = 32;
@@ -65,14 +73,15 @@ const displayOf = (displays: DisplayInfo[], r: Rect): DisplayInfo | undefined =>
   pickDisplay(displays, { x: r.x + r.width / 2, y: r.y + r.height / 2 });
 
 /**
- * Where the panel goes when minimised: the same width and left edge, about a tenth of the
+ * Where the panel goes when minimised: the shared width and the same left edge, about a tenth of the
  * height, resting just above the taskbar (the bottom of the work area) of the display it is on.
  */
 export function miniBounds(displays: DisplayInfo[], current: Rect, fullHeight: number): Rect {
   const height = Math.max(MINI_MIN_HEIGHT, Math.round(fullHeight * MINI_HEIGHT_RATIO));
   const area = displayOf(displays, current)?.workArea;
-  if (!area) return { ...current, height };
-  const width = Math.min(current.width, area.width);
+  if (!area) return { ...current, width: COMPACT_WIDTH, height };
+  // The width is the shared one, whatever size the window has now, so the bar can never be wider than the panel.
+  const width = Math.min(COMPACT_WIDTH, area.width);
   return {
     x: clamp(current.x, area.x, area.x + area.width - width),
     y: area.y + area.height - height - MINI_MARGIN,

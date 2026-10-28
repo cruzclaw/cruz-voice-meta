@@ -323,6 +323,12 @@ export class HostController {
     this.emit();
   }
 
+  /** Stops listening for the wake phrase and lets the microphone close. Nothing heard is kept. */
+  disableWake(): void {
+    this.wake = undefined;
+    this.emit();
+  }
+
   /** Stops timers and devices. Call when the app quits. */
   dispose(): void {
     this.stopAll();

@@ -642,6 +642,21 @@ describe('HostController timing and interrupts', () => {
       t.c.dispose();
     });
 
+    it('turning the phrase off closes the microphone at once, forgets the detector, and hears nothing after', () => {
+      const t = woken();
+      assert.equal(t.audio.wakeCalls.at(-1), true);
+      t.c.disableWake();
+      assert.equal(t.audio.wakeCalls.at(-1), false, 'the microphone is released');
+      assert.equal(t.c.wakeListening, false);
+      const fed = t.wake.fed;
+      t.c.onMic(PHRASE);
+      assert.equal(t.wake.fed, fed, 'nothing is checked any more');
+      assert.deepEqual(t.phrases, [], 'and nothing wakes it');
+      t.c.enableWake(t.wake);
+      assert.equal(t.audio.wakeCalls.at(-1), true, 'it can be turned on again');
+      t.c.dispose();
+    });
+
     it('closes the microphone for the phrase during a call and reopens it when the call ends', () => {
       const t = woken();
       t.active();

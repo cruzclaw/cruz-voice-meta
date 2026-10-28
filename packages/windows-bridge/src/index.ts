@@ -4,3 +4,4 @@ export * from './preferences.js';
 export * from './placement.js';
 export * from './window-options.js';
 export * from './endpoint.js';
+export * from './attention.js';

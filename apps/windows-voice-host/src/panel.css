@@ -11,6 +11,11 @@
   --accent: #1d2330;
   --danger: #c0392b;
   --warn: #a16207;
+  /* The four attention colours. Their meaning is fixed, and a test keeps these equal to ATTENTION_COLORS. */
+  --attn-update: #1fb26a;
+  --attn-approval: #f59e0b;
+  --attn-acknowledgement: #2f6df6;
+  --attn-error: #e5484d;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -21,9 +26,49 @@ body {
   color: var(--fg);
   background: var(--bg);
   border: 1px solid var(--line);
+  /* No line along the top: the attention strip sits at the very top edge of the window. */
+  border-top: 0;
   user-select: none;
   overflow: hidden;
+  position: relative;
 }
+
+/* ---- Silent attention: a thin, flowing strip of colour at the very top, in every size ---- */
+.hue {
+  position: absolute; top: 0; left: 0; right: 0; height: 4px; z-index: 10;
+  display: flex; pointer-events: none;
+}
+.hue[hidden] { display: none; }
+.seg {
+  --c: #999;
+  flex: 1 1 0; min-width: 0; height: 100%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 78%, #000), var(--c), color-mix(in srgb, var(--c) 62%, #fff), var(--c), color-mix(in srgb, var(--c) 78%, #000));
+  background-size: 200% 100%;
+  box-shadow: 0 2px 9px 1px color-mix(in srgb, var(--c) 70%, transparent);
+  animation: hue-flow 3.4s linear infinite;
+}
+.seg-update { --c: var(--attn-update); }
+.seg-approval { --c: var(--attn-approval); }
+.seg-acknowledgement { --c: var(--attn-acknowledgement); }
+.seg-error { --c: var(--attn-error); }
+@keyframes hue-flow { to { background-position: -200% 0; } }
+
+/* What is waiting, in words, for the person who wants to look. It never moves or speaks by itself. */
+.attn-chip {
+  display: flex; align-items: center; gap: 7px; align-self: center; max-width: calc(100% - 28px);
+  margin: 0 0 2px; padding: 2px 11px; height: 22px; white-space: nowrap;
+  font-size: 11px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px; background: #fff;
+}
+.attn-chip[hidden] { display: none; }
+.attn-chip:hover { background: #f4f6f9; color: var(--fg); }
+.attn-dots { display: inline-flex; gap: 3px; flex: none; }
+#attention-label { overflow: hidden; text-overflow: ellipsis; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.dot-update { --c: var(--attn-update); }
+.dot-approval { --c: var(--attn-approval); }
+.dot-acknowledgement { --c: var(--attn-acknowledgement); }
+.dot-error { --c: var(--attn-error); }
 
 header {
   display: flex;
@@ -152,14 +197,14 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 .diag { margin: 0; padding: 0 12px 6px; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (prefers-reduced-motion: reduce) {
-  .orb .core, .orb .swirl, .ring, .call-rings { animation: none !important; }
+  .orb .core, .orb .swirl, .ring, .call-rings, .seg { animation: none !important; }
   .scroll { scroll-behavior: auto; }
 }
 
 /* ---- Minimised: a thin bar above the taskbar with the state, Mute and Call or Hang up ---- */
 .mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 0 6px 0 10px; }
 body.is-mini { border-radius: 8px; }
-body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag { display: none; }
+body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag, body.is-mini .attn-chip { display: none; }
 body.is-mini .mini { display: flex; }
 .mini[hidden] { display: none; }
 .mini-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 100%; -webkit-app-region: drag; }
@@ -179,6 +224,8 @@ body.is-mini .mini { display: flex; }
 .mini-btn:hover { background: #f4f6f9; }
 .mini-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .mini-btn[aria-pressed="true"] { background: #1d2330; color: #fff; border-color: #1d2330; }
+.mini-attn { width: auto; min-width: 26px; padding: 0 7px; border-radius: 13px; font-size: 11px; font-weight: 600; }
+.mini-attn[hidden] { display: none; }
 .mini-btn .slash { opacity: 0; }
 .mini-btn[aria-pressed="true"] .slash { opacity: 1; }
 .mini-call { background: #1f9d63; border-color: #1f9d63; color: #fff; }

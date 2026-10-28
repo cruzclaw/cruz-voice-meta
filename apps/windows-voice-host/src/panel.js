@@ -141,6 +141,38 @@ window.panel.onDiag((text) => {
   $('diag').textContent = text;
 });
 
+// The silent attention strip, the words under it and the badge on the minimised bar. They show
+// exactly what the main process sends and do nothing until the person presses one of them.
+const hue = $('hue');
+const chip = $('attention');
+const miniAttn = $('mini-attn');
+window.panel.onAttention((a) => {
+  const segments = Array.isArray(a && a.segments) ? a.segments : [];
+  const label = (a && a.label) || '';
+  hue.hidden = segments.length === 0;
+  hue.setAttribute('aria-label', label);
+  hue.textContent = '';
+  $('attention-dots').textContent = '';
+  for (const segment of segments) {
+    const seg = document.createElement('span');
+    seg.className = `seg seg-${segment.kind}`;
+    seg.style.flexGrow = String(segment.share);
+    hue.append(seg);
+    const dot = document.createElement('span');
+    dot.className = `dot dot-${segment.kind}`;
+    $('attention-dots').append(dot);
+  }
+  chip.hidden = segments.length === 0;
+  $('attention-label').textContent = (a && a.shortLabel) || label;
+  chip.setAttribute('aria-label', label ? `${label}. Press to review.` : '');
+  miniAttn.hidden = segments.length === 0;
+  $('mini-attn-count').textContent = a && a.total ? String(a.total) : '';
+  miniAttn.setAttribute('aria-label', label ? `${label}. Press to review.` : '');
+  miniAttn.title = label;
+});
+chip.addEventListener('click', () => window.panel.openAttention());
+miniAttn.addEventListener('click', () => window.panel.openAttention());
+
 for (const button of document.querySelectorAll('.js-call')) {
   button.addEventListener('click', () => (inCall ? window.panel.hangup() : window.panel.talk()));
 }
