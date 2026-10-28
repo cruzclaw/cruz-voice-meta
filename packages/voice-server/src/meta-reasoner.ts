@@ -1,4 +1,4 @@
-import type { Reasoner, ReasonerEvent, ReasonerInput } from './ports.js';
+import type { Reasoner, ReasonerEvent, ReasonerExtension, ReasonerInput } from './ports.js';
 
 export const META_API_URL = 'https://api.meta.ai/v1';
 export const META_REASONING_MODEL = 'muse-spark-1.3';
@@ -17,6 +17,8 @@ export interface MetaReasonerOptions {
   intents?: ReadonlyArray<TaskIntent>;
   /** The name the assistant speaks as, for example the employee's name. */
   assistantName?: string;
+  /** Facts and tools of the host's own, such as pending items the person can ask about. */
+  extension?: ReasonerExtension;
 }
 
 export type TaskIntent = 'send_email' | 'save_note';
@@ -41,7 +43,17 @@ function instructionsFor(intents: ReadonlyArray<TaskIntent>, assistantName: stri
   return lines.join(' ');
 }
 
-function toolsFor(intents: ReadonlyArray<TaskIntent>) {
+const MAX_TOOL_CALLS_PER_TURN = 3;
+const CONTEXT_UNAVAILABLE = 'Some facts you would normally have could not be loaded right now. If the person asks about them, say you could not check, and do not guess.';
+
+function toolsFor(intents: ReadonlyArray<TaskIntent>, extension?: ReasonerExtension) {
+  const own = (extension?.tools ?? []).map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }));
+  if (own.some((t) => t.name === 'propose_task')) throw new Error('an extension tool may not be called propose_task');
+  if (new Set(own.map((t) => t.name)).size !== own.length) throw new Error('extension tool names must be different');
+  return [...ownTools(intents), ...own];
+}
+
+function ownTools(intents: ReadonlyArray<TaskIntent>) {
   return [
     {
       type: 'function',
@@ -110,7 +122,7 @@ export class MetaReasoner implements Reasoner {
     if (!intents.length) throw new Error('intents must not be empty');
     this.intents = intents;
     this.instructions = instructionsFor(intents, options.assistantName);
-    this.tools = toolsFor(intents);
+    this.tools = toolsFor(intents, options.extension);
   }
 
   async *respond(input: ReasonerInput, signal: AbortSignal): AsyncIterable<ReasonerEvent> {
@@ -129,6 +141,8 @@ export class MetaReasoner implements Reasoner {
   private async *respondWithin(input: ReasonerInput, signal: AbortSignal, timeout: AbortSignal): AsyncIterable<ReasonerEvent> {
     const turns = this.history.get(input.conversationId) ?? [];
     const both = AbortSignal.any([signal, timeout]);
+    const facts = await this.factsFor(input, both);
+    if (signal.aborted) return;
 
     let res: Response;
     try {
@@ -138,7 +152,7 @@ export class MetaReasoner implements Reasoner {
         body: JSON.stringify({
           model: this.options.model ?? META_REASONING_MODEL,
           stream: true,
-          instructions: this.instructions,
+          instructions: facts ? `${this.instructions}\n\n${facts}` : this.instructions,
           tools: this.tools,
           reasoning: { effort: this.options.effort ?? 'minimal' },
           // No max_output_tokens: reasoning tokens count against it and a low cap returns no answer.
@@ -156,8 +170,16 @@ export class MetaReasoner implements Reasoner {
     }
 
     let reply = '';
+    let toolCalls = 0;
+    let readAloud = false;
+    const names = new Map<string, string>();
     try {
       for await (const { event, data } of sse(res.body, both)) {
+        if (event === 'response.output_item.added' || event === 'response.output_item.done') {
+          const item = (JSON.parse(data) as { item?: { type?: unknown; id?: unknown; name?: unknown } }).item;
+          if (item?.type === 'function_call' && typeof item.id === 'string' && typeof item.name === 'string') names.set(item.id, item.name);
+          continue;
+        }
         if (event === 'response.output_text.delta') {
           const delta = (JSON.parse(data) as { delta?: unknown }).delta;
           if (typeof delta === 'string' && delta) {
@@ -165,12 +187,22 @@ export class MetaReasoner implements Reasoner {
             yield { type: 'text', text: delta };
           }
         } else if (event === 'response.function_call_arguments.done') {
-          const raw = (JSON.parse(data) as { arguments?: unknown }).arguments;
+          const call = JSON.parse(data) as { arguments?: unknown; name?: unknown; item_id?: unknown };
           let args: unknown;
           try {
-            args = typeof raw === 'string' ? JSON.parse(raw) : undefined;
+            args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : undefined;
           } catch {
             args = undefined;
+          }
+          const name = this.toolNameFor(call, args, names);
+          if (name === undefined) continue; // A tool that was never offered is ignored.
+          if (++toolCalls > MAX_TOOL_CALLS_PER_TURN) continue; // A model that keeps calling tools gets no further.
+          if (name !== 'propose_task') {
+            for (const spoken of await this.runExtensionCall(name, args, input, both)) {
+              if (spoken.type === 'text') readAloud = true;
+              yield spoken;
+            }
+            continue;
           }
           const task = toTask(args, this.intents);
           if (task) yield task;
@@ -185,7 +217,46 @@ export class MetaReasoner implements Reasoner {
     }
     if (signal.aborted) return;
     if (timeout.aborted) throw new Error('Meta reasoning timed out');
-    this.remember(input.conversationId, [...turns, { role: 'user', content: input.utterance }, ...(reply.trim() ? [{ role: 'assistant' as const, content: reply.trim() }] : [])]);
+    // Text the host read out is source data, not the assistant's own words, so it is not remembered as a reply.
+    const said = [reply.trim(), readAloud ? '(Read an item aloud.)' : ''].filter(Boolean).join(' ');
+    this.remember(input.conversationId, [...turns, { role: 'user', content: input.utterance }, ...(said ? [{ role: 'assistant' as const, content: said }] : [])]);
+  }
+
+  /** The host's facts for this turn, or a plain note that they could not be loaded. */
+  private async factsFor(input: ReasonerInput, signal: AbortSignal): Promise<string | undefined> {
+    const context = this.options.extension?.context;
+    if (!context) return undefined;
+    try {
+      const facts = (await context(input, signal))?.trim();
+      return facts ? facts : undefined;
+    } catch {
+      return signal.aborted ? undefined : CONTEXT_UNAVAILABLE;
+    }
+  }
+
+  /** Which tool the model called: its own statement if there is one, otherwise the shape of the arguments. */
+  private toolNameFor(call: { name?: unknown; item_id?: unknown }, args: unknown, names: Map<string, string>): string | undefined {
+    const known = new Set(this.tools.map((t) => t.name));
+    const said = typeof call.name === 'string' ? call.name : typeof call.item_id === 'string' ? names.get(call.item_id) : undefined;
+    if (said !== undefined) return known.has(said) ? said : undefined;
+    if (!args || typeof args !== 'object') return 'propose_task';
+    const keys = Object.keys(args as object);
+    if (keys.includes('intent')) return 'propose_task';
+    for (const tool of this.options.extension?.tools ?? []) {
+      const required = (tool.parameters as { required?: string[] }).required ?? [];
+      if (required.length > 0 && required.every((k) => keys.includes(k))) return tool.name;
+    }
+    return 'propose_task';
+  }
+
+  private async runExtensionCall(name: string, args: unknown, input: ReasonerInput, signal: AbortSignal): Promise<ReadonlyArray<ReasonerEvent>> {
+    const call = this.options.extension?.call;
+    if (!call) return [];
+    try {
+      return await call(name, args, input, signal);
+    } catch {
+      return signal.aborted ? [] : [{ type: 'text', text: ' I could not do that just now.' }];
+    }
   }
 
   private remember(conversationId: string, turns: Turn[]): void {
