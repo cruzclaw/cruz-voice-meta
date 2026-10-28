@@ -1,0 +1,13 @@
+{
+  "name": "@cruzclaw/windows-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure logic for the Windows voice panel: state machine, global shortcut, preferences and placement. No Electron import.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@cruzclaw/voice-core": "*"
+  }
+}

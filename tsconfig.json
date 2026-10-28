@@ -1,0 +1,48 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "types": [
+      "node"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@cruzclaw/voice-core": [
+        "packages/voice-core/src/index.ts"
+      ],
+      "@cruzclaw/voice-core/conformance": [
+        "packages/voice-core/src/conformance-entry.ts"
+      ],
+      "@cruzclaw/mock-employee": [
+        "examples/mock-employee/src/index.ts"
+      ],
+      "@cruzclaw/windows-bridge": [
+        "packages/windows-bridge/src/index.ts"
+      ],
+      "@cruzclaw/voice-server": [
+        "packages/voice-server/src/index.ts"
+      ],
+      "@cruzclaw/wake-word": [
+        "packages/wake-word/src/index.ts"
+      ],
+      "@cruzclaw/tts-kokoro": [
+        "packages/tts-kokoro/src/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "examples/*/src",
+    "examples/*/test",
+    "apps/*/src",
+    "apps/*/test"
+  ]
+}

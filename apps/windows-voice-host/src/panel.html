@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'" />
+    <title>Cruz</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <!-- The silent attention strip. It stays at the very top in both the full panel and the minimised bar. -->
+    <div id="hue" class="hue" role="img" hidden></div>
+    <header>
+      <span class="title">Cruz</span>
+      <button id="minimize" class="head-btn head-min" title="Minimise" aria-label="Minimise">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12" /></svg>
+      </button>
+      <button id="close" class="head-btn head-close" title="Hide (the tray icon stays)" aria-label="Hide panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      </button>
+    </header>
+
+    <button id="attention" class="attn-chip" type="button" hidden>
+      <span id="attention-dots" class="attn-dots" aria-hidden="true"></span>
+      <span id="attention-label"></span>
+    </button>
+
+    <main>
+      <div id="orb" class="orb" data-state="disconnected" aria-hidden="true">
+        <span class="glow"></span>
+        <span class="ring ring-a"></span>
+        <span class="ring ring-b"></span>
+        <span class="core"><span class="swirl"></span><span class="shine"></span></span>
+      </div>
+      <p id="caption" class="caption" role="status" aria-live="polite">Starting</p>
+
+      <section id="scroll" class="scroll" tabindex="0" aria-label="Conversation">
+        <div id="log" class="log"></div>
+      </section>
+      <p id="note" class="note" hidden></p>
+    </main>
+
+    <footer>
+      <button class="round js-mute" aria-pressed="false" aria-label="Mute microphone" title="Mute microphone">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+          <path class="slash" d="M4 4l16 16" />
+        </svg>
+      </button>
+      <button class="call js-call" data-mode="call" aria-label="Call">
+        <span class="call-rings" aria-hidden="true"></span>
+        <svg class="icon-call" viewBox="0 0 24 24" aria-hidden="true"><path class="handset" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+        <svg class="icon-hangup" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(135 12 12)"><path class="handset" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></g></svg>
+      </button>
+    </footer>
+    <p id="diag" class="diag" hidden></p>
+
+    <!-- The small bar the panel shrinks to, just above the taskbar. -->
+    <div id="mini" class="mini">
+      <span class="mini-drag">
+        <span id="mini-dot" class="mini-dot" data-state="disconnected"></span>
+        <span id="mini-caption" class="mini-caption">Starting</span>
+      </span>
+      <button class="mini-btn js-mute" aria-pressed="false" aria-label="Mute microphone" title="Mute microphone">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+          <path class="slash" d="M4 4l16 16" />
+        </svg>
+      </button>
+      <button class="mini-btn mini-call js-call" data-mode="call" aria-label="Call">
+        <svg class="icon-call" viewBox="0 0 24 24" aria-hidden="true"><path class="handset" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></svg>
+        <svg class="icon-hangup" viewBox="0 0 24 24" aria-hidden="true"><g transform="rotate(135 12 12)"><path class="handset" d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" /></g></svg>
+      </button>
+      <button id="mini-attn" class="mini-btn mini-attn" type="button" hidden>
+        <span id="mini-attn-count"></span>
+      </button>
+      <button id="expand" class="mini-btn" title="Expand" aria-label="Expand panel">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6" /></svg>
+      </button>
+    </div>
+    <script src="panel.js"></script>
+  </body>
+</html>

@@ -1,0 +1,59 @@
+name: release
+
+# Runs only for a version tag. Builds the voice-core, voice-server,
+# tts-kokoro and windows-voice-host tarballs, records their checksums and an SBOM, attests build
+# provenance, and attaches all of it to a GitHub release. The private host pins
+# each tarball by URL and checksum (and overrides voice-core for the other two,
+# which depend on it).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check the tag matches every package version
+        run: |
+          for p in packages/voice-core packages/voice-server packages/tts-kokoro apps/windows-voice-host; do
+            v="v$(node -p "require('./$p/package.json').version")"
+            if [ "$GITHUB_REF_NAME" != "$v" ]; then
+              echo "Tag $GITHUB_REF_NAME does not match $p version $v" >&2
+              exit 1
+            fi
+          done
+      - run: npm run build -w @cruzclaw/voice-core
+      - run: npm run build -w @cruzclaw/voice-server
+      - run: npm run build -w @cruzclaw/tts-kokoro
+      - run: npm run build -w @cruzclaw/windows-voice-host
+      - name: Pack, checksum and SBOM
+        run: |
+          mkdir -p out
+          for p in voice-core voice-server tts-kokoro windows-voice-host; do
+            npm pack -w @cruzclaw/$p --pack-destination out
+          done
+          (cd out && sha256sum *.tgz > SHA256SUMS)
+          npx --yes @cyclonedx/cyclonedx-npm@6.0.1 --output-file out/sbom.cdx.json --output-format JSON
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: out/*.tgz
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.tgz
+            out/SHA256SUMS
+            out/sbom.cdx.json
+          generate_release_notes: true

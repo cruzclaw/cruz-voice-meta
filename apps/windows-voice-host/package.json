@@ -1,0 +1,36 @@
+{
+  "name": "@cruzclaw/windows-voice-host",
+  "version": "0.2.0",
+  "description": "Windows voice host for Electron: the compact call panel with a silent attention strip, microphone and speaker, on-device speech and the voice protocol. Use createVoiceHost from another app, or run it standalone.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "node build.mjs && node start.mjs",
+    "test:electron": "node build.mjs && node test-electron/run.mjs"
+  },
+  "dependencies": {
+    "kokoro-js": "1.2.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.0",
+    "electron": "^44.4.3",
+    "esbuild": "^0.25.0",
+    "@cruzclaw/tts-kokoro": "*",
+    "@cruzclaw/voice-core": "*",
+    "@cruzclaw/wake-word": "*",
+    "@cruzclaw/windows-bridge": "*",
+    "ws": "^8.18.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "optionalDependencies": {
+    "sherpa-onnx-node": "2.0.1"
+  },
+  "peerDependencies": {
+    "electron": ">=44"
+  }
+}

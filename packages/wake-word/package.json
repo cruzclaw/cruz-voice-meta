@@ -1,0 +1,16 @@
+{
+  "name": "@cruzclaw/wake-word",
+  "version": "0.1.0",
+  "private": true,
+  "description": "On-device wake phrase detection (Hey Cruz, Hi Cruz, Hello Cruz, Okay Cruz) with sherpa-onnx. No audio leaves the machine.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "fetch-model": "node scripts/fetch-model.mjs"
+  },
+  "dependencies": {
+    "sherpa-onnx-node": "2.0.1"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "cruz-voice-meta",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Public voice modules for CruzClaw built on Meta models, with a standalone synthetic demo.",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*",
+    "examples/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test packages/voice-core/test/*.test.ts examples/mock-employee/test/*.test.ts apps/demo-server/test/*.test.ts packages/voice-server/test/*.test.ts packages/windows-bridge/test/*.test.ts packages/tts-kokoro/test/*.test.ts packages/wake-word/test/*.test.ts apps/windows-voice-host/test/*.test.ts scripts/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

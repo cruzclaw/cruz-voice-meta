@@ -1,0 +1,296 @@
+import type { Reasoner, ReasonerEvent, ReasonerExtension, ReasonerInput } from './ports.js';
+
+export const META_API_URL = 'https://api.meta.ai/v1';
+export const META_REASONING_MODEL = 'muse-spark-1.3';
+
+export interface MetaReasonerOptions {
+  /** Read from the server's environment only. Never log it or send it to a client. */
+  apiKey: string;
+  baseUrl?: string;
+  model?: string;
+  /** Voice needs fast answers. The API default reasoned for about 10 s on a simple request. */
+  effort?: 'minimal' | 'low' | 'medium' | 'high';
+  timeoutMs?: number;
+  /** Replace fetch, for tests. */
+  fetchImpl?: typeof fetch;
+  /** The tasks the assistant may propose. Offer only what the host can really do. Both by default. */
+  intents?: ReadonlyArray<TaskIntent>;
+  /** The name the assistant speaks as, for example the employee's name. */
+  assistantName?: string;
+  /** Facts and tools of the host's own, such as pending items the person can ask about. */
+  extension?: ReasonerExtension;
+}
+
+export type TaskIntent = 'send_email' | 'save_note';
+const ALL_INTENTS: ReadonlyArray<TaskIntent> = ['send_email', 'save_note'];
+
+const BASE_INSTRUCTIONS = [
+  'Your reply is spoken aloud.',
+  'Reply in one or two short sentences. Plain words only: no markdown, lists, emoji or URLs.',
+  'You can only propose. A person approves before anything happens, so never say an action is done or sent.',
+  'You cannot cancel, undo or change a task you already proposed. If asked to, say you cannot, and tell the person to use the cancel control.',
+];
+
+function instructionsFor(intents: ReadonlyArray<TaskIntent>, assistantName: string | undefined): string {
+  const lines = [assistantName ? `You are ${assistantName}, a virtual employee speaking with your owner.` : 'You are a voice assistant for a virtual employee.'];
+  lines.push(...BASE_INSTRUCTIONS);
+  const verbs = [intents.includes('send_email') ? 'send an email' : '', intents.includes('save_note') ? 'save a note' : ''].filter(Boolean);
+  if (verbs.length) lines.push(`When the person asks you to do something (${verbs.join(' or ')}), call propose_task.`);
+  lines.push(`You can only do this much: ${verbs.length ? verbs.join(' and ') : 'nothing yet'}. If asked for anything else, say so plainly.`);
+  if (intents.includes('send_email')) {
+    lines.push('For send_email you need the recipient address, a subject and a body. If any is missing, ask for it and do not call the tool.');
+  }
+  return lines.join(' ');
+}
+
+const MAX_TOOL_CALLS_PER_TURN = 3;
+const CONTEXT_UNAVAILABLE = 'Some facts you would normally have could not be loaded right now. If the person asks about them, say you could not check, and do not guess.';
+
+function toolsFor(intents: ReadonlyArray<TaskIntent>, extension?: ReasonerExtension) {
+  const own = (extension?.tools ?? []).map((t) => ({ type: 'function', name: t.name, description: t.description, parameters: t.parameters }));
+  if (own.some((t) => t.name === 'propose_task')) throw new Error('an extension tool may not be called propose_task');
+  if (new Set(own.map((t) => t.name)).size !== own.length) throw new Error('extension tool names must be different');
+  return [...ownTools(intents), ...own];
+}
+
+function ownTools(intents: ReadonlyArray<TaskIntent>) {
+  return [
+    {
+      type: 'function',
+      name: 'propose_task',
+      description: 'Propose an action for the owner to approve. Nothing happens until they approve it.',
+      parameters: {
+        type: 'object',
+        properties: {
+          intent: { type: 'string', enum: [...intents] },
+          to: { type: 'string', description: 'Recipient email address. For send_email only.' },
+          subject: { type: 'string', description: 'For send_email only.' },
+          body: { type: 'string', description: 'Email body, or the note text.' },
+        },
+        required: ['intent', 'body'],
+      },
+    },
+  ];
+}
+
+type Turn = { role: 'user' | 'assistant'; content: string };
+
+const MAX_TURNS = 10;
+const MAX_CONVERSATIONS = 100;
+const EMAIL = /^[^\s@<>"]{1,64}@[^\s@<>"]{1,255}\.[A-Za-z]{2,}$/;
+
+/** Turns a validated tool call into a task. Wording comes from checked fields, not from the model. */
+export function toTask(args: unknown, allowed: ReadonlyArray<TaskIntent> = ALL_INTENTS): Extract<ReasonerEvent, { type: 'task' }> | undefined {
+  if (!args || typeof args !== 'object') return undefined;
+  const a = args as Record<string, unknown>;
+  // The model is only offered the allowed intents, but its output is checked again here.
+  if (!allowed.includes(a.intent as TaskIntent)) return undefined;
+  const text = (v: unknown, max: number): string | undefined =>
+    typeof v === 'string' && v.trim() && v.length <= max ? v.trim() : undefined;
+  const body = text(a.body, 4000);
+  if (!body) return undefined;
+
+  if (a.intent === 'send_email') {
+    const to = text(a.to, 320);
+    const subject = text(a.subject, 200);
+    if (!to || !EMAIL.test(to) || !subject) return undefined;
+    return {
+      type: 'task',
+      intent: 'send_email',
+      params: { to },
+      approval: {
+        kind: 'email.send',
+        payload: { to, subject, body },
+        summary: `Send an email to ${to} titled ${subject}.`,
+      },
+    };
+  }
+  if (a.intent === 'save_note') return { type: 'task', intent: 'save_note', params: { text: body } };
+  return undefined;
+}
+
+/** Reasoning with Meta Muse Spark over the Responses API, streamed. Proposes tasks; never performs them. */
+export class MetaReasoner implements Reasoner {
+  private readonly history = new Map<string, Turn[]>();
+  private readonly intents: ReadonlyArray<TaskIntent>;
+  private readonly instructions: string;
+  private readonly tools: ReturnType<typeof toolsFor>;
+
+  constructor(private readonly options: MetaReasonerOptions) {
+    if (!options.apiKey) throw new Error('MODEL_API_KEY is not set');
+    const intents = options.intents ?? ALL_INTENTS;
+    if (!intents.length) throw new Error('intents must not be empty');
+    this.intents = intents;
+    this.instructions = instructionsFor(intents, options.assistantName);
+    this.tools = toolsFor(intents, options.extension);
+  }
+
+  async *respond(input: ReasonerInput, signal: AbortSignal): AsyncIterable<ReasonerEvent> {
+    if (signal.aborted) return;
+    // A real timer, not AbortSignal.timeout: that one does not keep the process alive, so a stalled
+    // stream with nothing else running would let the process end instead of timing out.
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), this.options.timeoutMs ?? 30000);
+    try {
+      yield* this.respondWithin(input, signal, deadline.signal);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  private async *respondWithin(input: ReasonerInput, signal: AbortSignal, timeout: AbortSignal): AsyncIterable<ReasonerEvent> {
+    const turns = this.history.get(input.conversationId) ?? [];
+    const both = AbortSignal.any([signal, timeout]);
+    const facts = await this.factsFor(input, both);
+    if (signal.aborted) return;
+
+    let res: Response;
+    try {
+      res = await (this.options.fetchImpl ?? fetch)(`${this.options.baseUrl ?? META_API_URL}/responses`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${this.options.apiKey}` },
+        body: JSON.stringify({
+          model: this.options.model ?? META_REASONING_MODEL,
+          stream: true,
+          instructions: facts ? `${this.instructions}\n\n${facts}` : this.instructions,
+          tools: this.tools,
+          reasoning: { effort: this.options.effort ?? 'minimal' },
+          // No max_output_tokens: reasoning tokens count against it and a low cap returns no answer.
+          input: [...turns, { role: 'user', content: input.utterance }],
+        }),
+        signal: both,
+      });
+    } catch (e) {
+      if (signal.aborted) return;
+      throw new Error(timeout.aborted ? 'Meta reasoning timed out' : 'Meta reasoning connection failed');
+    }
+    if (!res.ok || !res.body) {
+      const detail = await res.text().then((t) => (JSON.parse(t) as { error?: { message?: string } }).error?.message).catch(() => undefined);
+      throw new Error(`Meta reasoning failed: HTTP ${res.status}${detail ? ` ${detail}` : ''}`);
+    }
+
+    let reply = '';
+    let toolCalls = 0;
+    let readAloud = false;
+    const names = new Map<string, string>();
+    try {
+      for await (const { event, data } of sse(res.body, both)) {
+        if (event === 'response.output_item.added' || event === 'response.output_item.done') {
+          const item = (JSON.parse(data) as { item?: { type?: unknown; id?: unknown; name?: unknown } }).item;
+          if (item?.type === 'function_call' && typeof item.id === 'string' && typeof item.name === 'string') names.set(item.id, item.name);
+          continue;
+        }
+        if (event === 'response.output_text.delta') {
+          const delta = (JSON.parse(data) as { delta?: unknown }).delta;
+          if (typeof delta === 'string' && delta) {
+            reply += delta;
+            yield { type: 'text', text: delta };
+          }
+        } else if (event === 'response.function_call_arguments.done') {
+          const call = JSON.parse(data) as { arguments?: unknown; name?: unknown; item_id?: unknown };
+          let args: unknown;
+          try {
+            args = typeof call.arguments === 'string' ? JSON.parse(call.arguments) : undefined;
+          } catch {
+            args = undefined;
+          }
+          const name = this.toolNameFor(call, names);
+          if (name === undefined) continue; // A tool that was never offered is ignored.
+          if (++toolCalls > MAX_TOOL_CALLS_PER_TURN) continue; // A model that keeps calling tools gets no further.
+          if (name !== 'propose_task') {
+            for (const spoken of await this.runExtensionCall(name, args, input, both)) {
+              if (spoken.type === 'text') readAloud = true;
+              yield spoken;
+            }
+            continue;
+          }
+          const task = toTask(args, this.intents);
+          if (task) yield task;
+          else yield { type: 'text', text: ' I could not prepare that action. Could you give me the missing details?' };
+        } else if (event === 'response.failed' || event === 'error') {
+          throw new Error('Meta reasoning failed');
+        }
+      }
+    } catch (e) {
+      if (signal.aborted) return;
+      throw e instanceof Error && e.message.startsWith('Meta reasoning') ? e : new Error(timeout.aborted ? 'Meta reasoning timed out' : 'Meta reasoning stream failed');
+    }
+    if (signal.aborted) return;
+    if (timeout.aborted) throw new Error('Meta reasoning timed out');
+    // Text the host read out is source data, not the assistant's own words, so it is not remembered as a reply.
+    const said = [reply.trim(), readAloud ? '(Read an item aloud.)' : ''].filter(Boolean).join(' ');
+    this.remember(input.conversationId, [...turns, { role: 'user', content: input.utterance }, ...(said ? [{ role: 'assistant' as const, content: said }] : [])]);
+  }
+
+  /** The host's facts for this turn, or a plain note that they could not be loaded. */
+  private async factsFor(input: ReasonerInput, signal: AbortSignal): Promise<string | undefined> {
+    const context = this.options.extension?.context;
+    if (!context) return undefined;
+    try {
+      const facts = (await context(input, signal))?.trim();
+      return facts ? facts : undefined;
+    } catch {
+      return signal.aborted ? undefined : CONTEXT_UNAVAILABLE;
+    }
+  }
+
+  /**
+   * Which tool the model called: its own statement (the call's name, or the name it announced for the call's item id).
+   * Nothing is ever guessed from the shape of the arguments, because two tools can take the same arguments and a wrong
+   * guess would do the wrong thing (read what the person meant to skip). A call with no name is ignored, and the person
+   * can ask again, whenever the host has added tools of its own. Only when there are none is an unnamed call taken as
+   * propose_task, which is the one tool then on offer.
+   */
+  private toolNameFor(call: { name?: unknown; item_id?: unknown }, names: Map<string, string>): string | undefined {
+    const known = new Set(this.tools.map((t) => t.name));
+    const said = typeof call.name === 'string' ? call.name : typeof call.item_id === 'string' ? names.get(call.item_id) : undefined;
+    if (said !== undefined) return known.has(said) ? said : undefined;
+    return (this.options.extension?.tools ?? []).length > 0 ? undefined : 'propose_task';
+  }
+
+  private async runExtensionCall(name: string, args: unknown, input: ReasonerInput, signal: AbortSignal): Promise<ReadonlyArray<ReasonerEvent>> {
+    const call = this.options.extension?.call;
+    if (!call) return [];
+    try {
+      return await call(name, args, input, signal);
+    } catch {
+      return signal.aborted ? [] : [{ type: 'text', text: ' I could not do that just now.' }];
+    }
+  }
+
+  private remember(conversationId: string, turns: Turn[]): void {
+    this.history.delete(conversationId);
+    this.history.set(conversationId, turns.slice(-MAX_TURNS));
+    while (this.history.size > MAX_CONVERSATIONS) this.history.delete(this.history.keys().next().value as string);
+  }
+}
+
+/** Minimal server-sent-events reader. Handles events split across network chunks. */
+async function* sse(body: ReadableStream<Uint8Array>, signal: AbortSignal): AsyncIterable<{ event: string; data: string }> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const stop = (): void => void reader.cancel().catch(() => undefined);
+  signal.addEventListener('abort', stop, { once: true });
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+      for (let end = buffer.indexOf('\n\n'); end >= 0; end = buffer.indexOf('\n\n')) {
+        const block = buffer.slice(0, end);
+        buffer = buffer.slice(end + 2);
+        const event = /^event: ?(.*)$/m.exec(block)?.[1];
+        const data = block
+          .split('\n')
+          .filter((l) => l.startsWith('data:'))
+          .map((l) => l.slice(5).replace(/^ /, ''))
+          .join('\n');
+        if (event && data) yield { event, data };
+      }
+    }
+  } finally {
+    signal.removeEventListener('abort', stop);
+    stop();
+  }
+}

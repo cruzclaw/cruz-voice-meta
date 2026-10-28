@@ -1,0 +1,30 @@
+{
+  "name": "@cruzclaw/voice-core",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Versioned VoiceEmployeeHost contract, DTOs and conformance suite.",
+  "license": "Apache-2.0",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/types/index.d.ts",
+  "typesVersions": {
+    "*": { "conformance": ["dist/types/conformance-entry.d.ts"] }
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "require": "./dist/cjs/index.js"
+    },
+    "./conformance": {
+      "types": "./dist/types/conformance-entry.d.ts",
+      "import": "./dist/esm/conformance-entry.js",
+      "require": "./dist/cjs/conformance-entry.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node scripts/build.mjs"
+  }
+}
