@@ -5,11 +5,19 @@ import path from 'node:path';
 import { BrowserWindow, ipcMain, screen, utilityProcess } from 'electron';
 import {
   EndpointDetector,
+  MIC_TEXT,
   attentionLabel,
   attentionShortLabel,
   attentionTotal,
+  canCall,
+  caption as captionFor,
+  chosenEmployee,
+  cleanEmployees,
+  cleanReadiness,
+  emptyText,
   expandedBounds,
   hueSegments,
+  micState,
   miniBounds,
   noAttention,
   normalizeAttention,
@@ -20,6 +28,8 @@ import {
   type AttentionSummary,
   type DisplayState,
   type PanelState,
+  type Readiness,
+  type VoiceEmployee,
 } from '@cruzclaw/windows-bridge';
 import { VoiceClient } from './client.js';
 import { ConnectionError, type ConnectionProvider } from './connection.js';
@@ -75,6 +85,12 @@ export interface VoiceHostOptions {
   onWake?: (phrase: string) => void;
   /** A problem that keeps the call from working, in words for the person. Not called for ordinary retries. */
   onProblem?: (message: string) => void;
+  /**
+   * The person chose an employee in the panel. The app keeps the choice for that account, ends any call with the
+   * earlier employee, and then calls setEmployees again with the same list and the new choice. The host changes
+   * nothing by itself, so the app stays the one place that knows who is chosen.
+   */
+  onEmployeeChoose?: (id: string) => void;
 }
 
 export interface VoiceHost {
@@ -87,12 +103,25 @@ export interface VoiceHost {
    * The person signed out. Closes the connection (which ends the conversation on the server), stops the microphone
    * and the speaker, clears what is on the panel, and stops reconnecting. The next press opens a fresh connection.
    */
-  endSession(): void;
+  endSession(reason?: 'signed_out' | 'employee_changed'): void;
   toggleMute(): void;
-  /** Shows the full panel. Never takes focus. */
+  /** Shows the full panel. Never takes focus. Brings it back after the person closed it. */
   showPanel(): void;
+  /**
+   * Shows the small bar, without focus. It starts no call, opens no microphone and turns nothing on. The bar then
+   * stays until the person closes it (or hidePanel is called); waiting items never bring it back after that, and
+   * showPanel, press or showBar do.
+   */
+  showBar(): void;
+  /** The same as the person pressing close: hidden for now, back with showPanel, press or showBar. */
   hidePanel(): void;
   panelVisible(): boolean;
+  /** The employees the person can talk to and the one chosen for voice (if any, and only if in the list). */
+  setEmployees(employees: unknown, selectedId?: string): void;
+  /** Whether a call can start, and if not, why. See Readiness. The host adds connection_failed itself. */
+  setReadiness(readiness: unknown): void;
+  /** What the panel is saying about readiness now. */
+  readonly readiness: Readiness;
   /** What is waiting. Draws the strip in the full panel and the minimised bar, silently. */
   setAttention(summary: unknown): void;
   readonly attention: AttentionSummary;
@@ -127,8 +156,13 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   let panel: BrowserWindow | undefined;
   let panelLoaded = false;
   let mini = false;
-  /** The panel was brought up only to show waiting items, so it goes away again when they are gone. */
-  let shownForAttention = false;
+  /** The person closed the panel. Waiting items do not bring it back; showPanel, press and showBar do. */
+  let dismissed = false;
+  let employees: VoiceEmployee[] = [];
+  let selectedEmployeeId: string | undefined;
+  /** Set by the app. The panel is told this, except that a connection that keeps failing overrides "ready". */
+  let baseReadiness: Readiness = { state: 'ready' };
+  let linkFailed = false;
   let diag = '';
   let attention: AttentionSummary = noAttention();
   let utterance: Buffer[] = [];
@@ -264,10 +298,25 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     return screen.getAllDisplays().map((d) => ({ id: d.id, workArea: d.workArea, primary: d.id === primary }));
   };
 
+  const effectiveReadiness = (): Readiness => (baseReadiness.state === 'ready' && linkFailed ? { state: 'connection_failed' } : baseReadiness);
+
   function pushPanel(state: PanelState, display: DisplayState): void {
     const waiting = state.tasks.find((t) => t.approval)?.approval?.summary;
+    const readiness = effectiveReadiness();
+    const chosen = chosenEmployee(employees, selectedEmployeeId);
+    const mic = state.micMuted ? 'off' : micState(display, controller.wakeListening);
     panel?.webContents.send('panel-state', {
       display,
+      // Everything the panel says about who, whether a call can start and the microphone is decided here, in tested code.
+      readiness: readiness.state,
+      canCall: canCall(readiness),
+      employee: chosen?.name,
+      employees,
+      selectedEmployeeId: chosen?.id,
+      caption: captionFor(readiness, display, STATE_TEXT[display], chosen?.name),
+      emptyText: emptyText(readiness, shortcutLabel),
+      mic,
+      micText: MIC_TEXT[mic],
       label: STATE_TEXT[display],
       connected: state.connected,
       transcript: state.transcript,
@@ -366,26 +415,9 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (sameAttention(next, attention)) return;
     attention = next;
     pushAttention();
-    if (attentionTotal(attention) > 0) {
-      // Something is waiting. Make the strip visible in its smallest form, with no focus, sound or speech.
-      // If the person already has the panel open, it simply shows the strip where it is.
-      if (panel?.isVisible()) return;
-      shownForAttention = true;
-      panel ??= createPanel();
-      if (panelLoaded) setMini(true);
-      else {
-        pendingBar = true;
-        pendingShow = true;
-      }
-    } else if (shownForAttention) {
-      // The strip was only up because of waiting items, so it goes away with them, unless a call is under way.
-      if (!controller.inCall) {
-        shownForAttention = false;
-        pendingShow = false;
-        pendingBar = false;
-        panel?.hide();
-      }
-    }
+    // The strip is drawn wherever the panel is. Something waiting brings up the small bar, with no focus, sound or
+    // speech, unless the person has closed the panel. Nothing here ever hides it: only the person closes it.
+    if (attentionTotal(attention) > 0 && !dismissed && !panel?.isVisible()) showBarSilently();
   }
 
   // ---- the connection ----
@@ -408,6 +440,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
         log(reason);
         client = undefined;
         controller.setConnected(false);
+        linkFailed = true;
+        pushPanel(controller.state, controller.display);
         scheduleReconnect();
       },
     });
@@ -421,6 +455,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       await next.openConnection();
     } catch (e) {
       if (disposed || mine !== generation) return;
+      const wasFailing = linkFailed;
       // A wrong password or an account without voice will not fix itself, and retrying would only repeat the attempt.
       if (e instanceof ConnectionError && e.fatal) {
         log(`${e.message} Fix this and start the app again.`);
@@ -430,6 +465,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
         return;
       }
       log(`${(e as Error).message}. Retrying in ${Math.round(reconnectWait / 1000)} s.`);
+      linkFailed = true;
+      if (!wasFailing) pushPanel(controller.state, controller.display);
       scheduleReconnect();
       return;
     }
@@ -440,6 +477,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     }
     client = next;
     reconnectWait = 2000;
+    if (linkFailed) {
+      linkFailed = false;
+      pushPanel(controller.state, controller.display);
+    }
     controller.setConnected(true);
     log('connected');
     if (pendingPress.take()) controller.press();
@@ -575,24 +616,58 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     peakSpeakerLevel = Math.max(peakSpeakerLevel, level);
     if (controller.state.phase === 'speaking') panel?.webContents.send('panel-level', level);
   });
-  on('panel-talk', (event) => void (fromPanel(event) && controller.press()));
+  on('panel-talk', (event) => void (fromPanel(event) && pressNow()));
   on('panel-hangup', (event) => {
     if (!fromPanel(event)) return;
     pendingPress.clear();
     controller.hangUp();
   });
   on('panel-mute', (event) => void (fromPanel(event) && controller.toggleMute()));
-  on('panel-minimize', (event) => void (fromPanel(event) && (shownForAttention = false, setMini(true))));
-  on('panel-expand', (event) => void (fromPanel(event) && (shownForAttention = false, setMini(false))));
-  on('panel-hide', (event) => {
-    if (!fromPanel(event)) return;
-    // Closing with something waiting leaves the small bar, so the strip is never taken away from the person.
-    // The bar then goes away by itself once nothing is waiting. With nothing waiting, closing hides it completely.
-    shownForAttention = attentionTotal(attention) > 0;
-    if (shownForAttention) setMini(true);
-    else panel?.hide();
+  on('panel-minimize', (event) => void (fromPanel(event) && setMini(true)));
+  on('panel-expand', (event) => void (fromPanel(event) && setMini(false)));
+  on('panel-hide', (event) => void (fromPanel(event) && dismissPanel()));
+  on('panel-choose-employee', (event, id: unknown) => {
+    if (!fromPanel(event) || typeof id !== 'string' || !employees.some((e) => e.id === id)) return;
+    options.onEmployeeChoose?.(id);
   });
   on('panel-attention-open', (event) => void (fromPanel(event) && options.onAttentionOpen?.()));
+
+  /** Closing is the person's act and lasts until the next showPanel, press or showBar (or the next launch). */
+  function dismissPanel(): void {
+    dismissed = true;
+    pendingShow = false;
+    pendingBar = false;
+    panel?.hide();
+  }
+
+  /** The small bar, without focus. */
+  function showBarSilently(): void {
+    dismissed = false;
+    panel ??= createPanel();
+    if (panelLoaded) setMini(true);
+    else {
+      pendingBar = true;
+      pendingShow = true;
+    }
+  }
+
+  /**
+   * Call pressed in the panel or with the shortcut. A call connects when it is pressed, so a press before the
+   * connection is up connects now and starts the call when it is. If the account is not ready, nothing connects:
+   * the panel opens and says why.
+   */
+  function pressNow(): void {
+    if (!canCall(effectiveReadiness())) {
+      log(`call not started: ${effectiveReadiness().state}`);
+      return;
+    }
+    if (!controller.state.connected) {
+      pendingPress.request();
+      void connectOnce();
+      return;
+    }
+    controller.press();
+  }
 
   // ---- the handle ----
 
@@ -600,21 +675,17 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     controller,
     start: () => void connectOnce(),
     press: () => {
-      shownForAttention = false;
+      dismissed = false;
       showPanelSilently();
-      // Not connected yet: connect now, and start the call when it is. Nothing connects before the first press.
-      if (!controller.state.connected) {
-        pendingPress.request();
-        void connectOnce();
-        return;
-      }
-      controller.press();
+      // Not ready: show the full panel so the reason is on screen, and start nothing.
+      if (!canCall(effectiveReadiness()) && mini) setMini(false);
+      pressNow();
     },
     hangUp: () => {
       pendingPress.clear();
       controller.hangUp();
     },
-    endSession: () => {
+    endSession: (reason = 'signed_out') => {
       pendingPress.clear();
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
@@ -624,20 +695,31 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       conversationEpoch += 1;
       const old = client;
       client = undefined;
+      // Before the panel is told, so a failure from the earlier account is not shown to whoever comes next.
+      linkFailed = false;
       controller.endConversation();
       old?.close();
-      log('signed out: the call and the connection were closed');
+      log(reason === 'employee_changed' ? 'employee changed: the call and the connection were closed' : 'signed out: the call and the connection were closed');
     },
     toggleMute: () => controller.toggleMute(),
     showPanel: () => {
-      shownForAttention = false;
+      dismissed = false;
       showPanelSilently();
       if (mini) setMini(false);
     },
-    hidePanel: () => {
-      shownForAttention = attentionTotal(attention) > 0;
-      if (shownForAttention) setMini(true);
-      else panel?.hide();
+    showBar: showBarSilently,
+    hidePanel: dismissPanel,
+    setEmployees(list, selectedId) {
+      employees = cleanEmployees(list);
+      selectedEmployeeId = chosenEmployee(employees, selectedId)?.id;
+      pushPanel(controller.state, controller.display);
+    },
+    setReadiness(value) {
+      baseReadiness = cleanReadiness(value);
+      pushPanel(controller.state, controller.display);
+    },
+    get readiness() {
+      return effectiveReadiness();
     },
     panelVisible: () => !!panel && panel.isVisible(),
     setAttention: applyAttention,

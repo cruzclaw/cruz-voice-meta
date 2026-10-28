@@ -34,14 +34,14 @@ function syncTurns(s) {
   if (turns.length > 8) turns = turns.slice(-8);
 }
 
-let shortcut = '';
+let emptyText = '';
 
 function renderTurns() {
   log.textContent = '';
   if (!turns.length) {
     const p = document.createElement('p');
     p.className = 'empty';
-    p.textContent = shortcut ? `Press Call or ${shortcut} to start.` : 'Press Call to start.';
+    p.textContent = emptyText;
     log.append(p);
     return;
   }
@@ -76,8 +76,10 @@ const CAPTION = {
 };
 
 let inCall = false;
+let lastState;
 
 window.panel.onState((s) => {
+  lastState = s;
   // Signed out: nothing of the earlier conversation stays in the page.
   if ((s.epoch || 0) !== epoch) {
     epoch = s.epoch || 0;
@@ -92,11 +94,19 @@ window.panel.onState((s) => {
   orb.dataset.muted = String(muted);
   miniDot.dataset.state = s.display;
   miniDot.dataset.muted = String(muted);
-  const caption = s.muted && s.display === 'idle' ? 'Microphone muted' : s.wake && s.display === 'idle' ? 'Say “Hey Cruz”' : CAPTION[s.display] || s.label;
+  // What it says, who it is for, whether a call can start and what the microphone is doing all come from the main
+  // process, already decided. This page only shows them.
+  const caption = s.caption || CAPTION[s.display] || s.label;
   $('caption').textContent = caption;
   $('mini-caption').textContent = caption;
+  for (const id of ['mic', 'mini-mic']) {
+    $(id).textContent = s.micText || '';
+    $(id).dataset.mic = s.mic || 'off';
+  }
+  $('title').textContent = s.employee || 'Cruz';
+  showEmployees(s);
 
-  shortcut = s.shortcut || '';
+  emptyText = s.emptyText || '';
   syncTurns(s);
   renderTurns();
 
@@ -105,8 +115,9 @@ window.panel.onState((s) => {
   for (const button of document.querySelectorAll('.js-call')) {
     button.dataset.mode = inCall ? 'hangup' : 'call';
     button.dataset.listening = String(s.display === 'listening');
-    button.disabled = !s.connected;
-    const label = inCall ? 'Hang up' : `Call (${s.shortcut})`;
+    // A call can start whenever the account is ready: it connects when pressed. In a call, hang up is always there.
+    button.disabled = !inCall && !s.canCall;
+    const label = inCall ? 'Hang up' : s.canCall ? (s.shortcut ? `Call (${s.shortcut})` : 'Call') : 'Call is not available yet';
     button.setAttribute('aria-label', label);
     button.title = label;
   }
@@ -127,6 +138,47 @@ window.panel.onState((s) => {
   diag.hidden = !s.debug;
   if (s.display !== 'listening' && s.display !== 'speaking') target = 0;
 });
+
+// ---- Choosing the employee for voice ----
+let chooseOpen = false;
+let lastEmployees = '';
+
+function showEmployees(s) {
+  const list = Array.isArray(s.employees) ? s.employees : [];
+  const mustChoose = s.readiness === 'no_employee' && list.length > 0;
+  // Always open when nothing is chosen, so the way forward is on the panel itself. Otherwise only after Change.
+  const open = mustChoose || (chooseOpen && list.length > 0);
+  if (!mustChoose && !chooseOpen) chooseOpen = false;
+  $('choose').hidden = !open;
+  $('change-employee').hidden = list.length === 0 || mustChoose;
+  $('mini-choose').hidden = !mustChoose;
+  $('choose-heading').textContent = mustChoose ? 'Choose an employee' : 'Talk to';
+  const key = JSON.stringify([list, s.selectedEmployeeId]);
+  if (key === lastEmployees) return;
+  lastEmployees = key;
+  const box = $('choose-list');
+  box.textContent = '';
+  for (const person of list) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'choice';
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(person.id === s.selectedEmployeeId));
+    button.textContent = person.name;
+    button.addEventListener('click', () => {
+      chooseOpen = false;
+      window.panel.chooseEmployee(person.id);
+    });
+    box.append(button);
+  }
+}
+$('change-employee').addEventListener('click', () => {
+  chooseOpen = !chooseOpen;
+  lastEmployees = '';
+  // Redraw from the last state the main process sent.
+  if (lastState) showEmployees(lastState);
+});
+$('mini-choose').addEventListener('click', () => window.panel.expand());
 
 // The orb follows the loudness of whoever is talking: the person while listening, the assistant while speaking.
 let target = 0;

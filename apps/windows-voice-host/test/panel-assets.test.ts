@@ -65,4 +65,27 @@ describe('the panel pages', () => {
   it('stop the flowing motion for people who ask for less motion', () => {
     assert.match(css, /prefers-reduced-motion[\s\S]*\.seg\s*\{\s*animation:\s*none/);
   });
+
+  it('let the person choose the employee from the panel itself, and hand only an id to the app', () => {
+    assert.match(preload, /chooseEmployee: \(id\) => ipcRenderer\.send\('panel-choose-employee', id\)/);
+    assert.match(js, /window\.panel\.chooseEmployee\(person\.id\)/);
+    assert.ok(html.includes('id="choose"') && html.includes('id="change-employee"') && html.includes('id="mini-choose"'));
+  });
+
+  it('write employee names as text, never as markup', () => {
+    assert.equal(/innerHTML|insertAdjacentHTML|outerHTML/.test(js), false);
+    assert.match(js, /button\.textContent = person\.name/);
+  });
+
+  it('take what to say, who it is for, the microphone words and whether Call works from the main process, not from the page', () => {
+    for (const field of ['s.caption', 's.emptyText', 's.micText', 's.employee', 's.canCall']) assert.ok(js.includes(field), field);
+    assert.equal(/Press Call|tray|menu/i.test(js), false, 'the page holds no instructions of its own');
+    assert.equal(/button\.disabled = !s\.connected/.test(js), false, 'Call no longer waits for a connection that only a call opens');
+  });
+
+  it('show the microphone state in its own element on both the full panel and the bar, with words', () => {
+    assert.ok(html.includes('id="mic"') && html.includes('id="mini-mic"'));
+    assert.match(css, /\.mic\[data-mic="wake"\]/);
+    assert.match(css, /\.mini-mic/);
+  });
 });

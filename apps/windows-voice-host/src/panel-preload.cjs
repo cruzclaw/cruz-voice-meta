@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('panel', {
   expand: () => ipcRenderer.send('panel-expand'),
   hide: () => ipcRenderer.send('panel-hide'),
   openAttention: () => ipcRenderer.send('panel-attention-open'),
+  chooseEmployee: (id) => ipcRenderer.send('panel-choose-employee', id),
 });

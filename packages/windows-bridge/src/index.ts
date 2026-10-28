@@ -5,3 +5,4 @@ export * from './placement.js';
 export * from './window-options.js';
 export * from './endpoint.js';
 export * from './attention.js';
+export * from './panel-view.js';
