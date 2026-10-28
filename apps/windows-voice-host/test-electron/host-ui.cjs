@@ -149,6 +149,20 @@ app.whenReady().then(async () => {
   await wait(2500);
   check(BrowserWindow.getAllWindows().length === 2, 'the audio window opens only when the speaker or microphone is first needed');
   check(lines.some((l) => /test tone played/.test(l)), 'and what was sent to it before its page had loaded still arrives: the test tone played');
+  // 8. Signing out ends everything: the words on the panel go, and the connection is not retried.
+  const logText = () => dom(`document.getElementById('log').textContent`);
+  host.controller.onServer({ v: 1, seq: 1, type: 'transcript.final', utteranceId: 'u1', text: 'what does the email from Maria say' }, true);
+  host.controller.onServer({ v: 1, seq: 2, type: 'assistant.text.delta', turnId: 't1', text: 'It says the numbers are 41 and 97.' }, true);
+  await wait(400);
+  check(/numbers are 41 and 97/.test(await logText()), 'a conversation is on the panel');
+  host.endSession();
+  const triesAtSignOut = resolves;
+  await wait(500);
+  const afterText = await logText();
+  check(!/Maria|41 and 97/.test(afterText), `signed out: none of the conversation is left on the panel (${JSON.stringify(afterText.slice(0, 60))})`);
+  check(host.controller.display === 'disconnected' && !host.controller.inCall, 'and the call is over');
+  await wait(5000);
+  check(resolves === triesAtSignOut, `and it does not try to reconnect by itself (${resolves} tries, ${triesAtSignOut} at sign-out)`);
   host.hangUp();
   focusGrabs.length = 0;
 

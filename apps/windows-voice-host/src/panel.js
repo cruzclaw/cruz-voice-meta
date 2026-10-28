@@ -10,6 +10,7 @@ let turns = [];
 let lastSaid = '';
 let lastReply = '';
 let newTurnNext = false;
+let epoch = 0;
 
 function syncTurns(s) {
   const said = s.transcript || '';
@@ -77,6 +78,14 @@ const CAPTION = {
 let inCall = false;
 
 window.panel.onState((s) => {
+  // Signed out: nothing of the earlier conversation stays in the page.
+  if ((s.epoch || 0) !== epoch) {
+    epoch = s.epoch || 0;
+    turns = [];
+    lastSaid = '';
+    lastReply = '';
+    newTurnNext = false;
+  }
   document.body.classList.toggle('is-mini', !!s.mini);
   const muted = !!s.muted && s.display !== 'speaking' && s.display !== 'thinking';
   orb.dataset.state = s.display;

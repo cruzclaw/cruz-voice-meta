@@ -24,6 +24,7 @@ import {
 import { VoiceClient } from './client.js';
 import { ConnectionError, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
+import { conversationLogLine } from './log-lines.js';
 import { PendingPress } from './pending-press.js';
 import { SpeechClient, type SpeechChild } from './speech-client.js';
 
@@ -82,6 +83,11 @@ export interface VoiceHost {
   start(): void;
   press(): void;
   hangUp(): void;
+  /**
+   * The person signed out. Closes the connection (which ends the conversation on the server), stops the microphone
+   * and the speaker, clears what is on the panel, and stops reconnecting. The next press opens a fresh connection.
+   */
+  endSession(): void;
   toggleMute(): void;
   /** Shows the full panel. Never takes focus. */
   showPanel(): void;
@@ -130,6 +136,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   let client: VoiceClient | undefined;
   let disposed = false;
   let generation = 0;
+  let conversationEpoch = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectWait = 2000;
   let lastErrorShown: PanelState['lastError'];
@@ -274,6 +281,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       inCall: controller.inCall,
       mini,
       debug: !!options.debugDump,
+      // The page forgets the turns it has been keeping when this changes (the person signed out).
+      epoch: conversationEpoch,
     });
   }
 
@@ -387,9 +396,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       onMessage: (m) => {
         if (mine !== generation) return;
         controller.onServer(m);
-        if (m.type === 'transcript.final') log(`you said: ${m.text}`);
-        if (m.type === 'assistant.text.done') log(`reply: ${controller.state.reply}`);
-        if (m.type === 'approval.requested') log(`needs approval: ${m.summary}`);
+        const line = conversationLogLine(m, controller.state.reply);
+        if (line) log(line);
         if (controller.display !== lastDisplay) log(`state: ${(lastDisplay = controller.display)}`);
       },
       onSpeech: (pcm) => {
@@ -408,10 +416,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   async function connectOnce(): Promise<void> {
     if (disposed || client) return;
     const next = newClient();
+    const mine = generation;
     try {
       await next.openConnection();
     } catch (e) {
-      if (disposed) return;
+      if (disposed || mine !== generation) return;
       // A wrong password or an account without voice will not fix itself, and retrying would only repeat the attempt.
       if (e instanceof ConnectionError && e.fatal) {
         log(`${e.message} Fix this and start the app again.`);
@@ -422,6 +431,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       }
       log(`${(e as Error).message}. Retrying in ${Math.round(reconnectWait / 1000)} s.`);
       scheduleReconnect();
+      return;
+    }
+    // The person signed out while this was connecting.
+    if (mine !== generation) {
+      next.close();
       return;
     }
     client = next;
@@ -599,6 +613,20 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     hangUp: () => {
       pendingPress.clear();
       controller.hangUp();
+    },
+    endSession: () => {
+      pendingPress.clear();
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
+      reconnectWait = 2000;
+      // Whatever the old connection still says is ignored, and a connection still being opened is closed when it opens.
+      generation += 1;
+      conversationEpoch += 1;
+      const old = client;
+      client = undefined;
+      controller.endConversation();
+      old?.close();
+      log('signed out: the call and the connection were closed');
     },
     toggleMute: () => controller.toggleMute(),
     showPanel: () => {

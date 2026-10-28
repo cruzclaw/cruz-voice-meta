@@ -567,6 +567,50 @@ describe('HostController timing and interrupts', () => {
     t.c.dispose();
   });
 
+  it('signing out in the middle of a call stops everything and leaves nothing of the conversation on the panel', () => {
+    const t = scripted({ endpoint: new EndpointDetector() });
+    t.active();
+    t.server({ type: 'transcript.final', utteranceId: 'u1', text: 'what does the email say' });
+    t.server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'The email from Maria says the numbers are 41 and 97.' });
+    t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+    assert.equal(t.c.display, 'speaking');
+    assert.match(t.c.state.reply, /41 and 97/);
+
+    t.c.endConversation();
+
+    assert.equal(t.c.inCall, false);
+    assert.equal(t.c.display, 'disconnected');
+    assert.equal(t.c.state.connected, false);
+    assert.equal(t.c.state.sessionActive, false);
+    assert.equal(t.c.state.transcript, '');
+    assert.equal(t.c.state.reply, '', 'the last reply is gone');
+    assert.deepEqual(t.c.state.tasks, []);
+    assert.equal(t.audio.calls.at(-1), 'stopPlayback');
+    assert.ok(t.audio.calls.includes('stop'), 'the microphone is closed');
+    // What the old connection still sends is ignored.
+    t.server({ type: 'assistant.text.delta', turnId: 'turn-1', text: 'More of it.' });
+    t.server({ type: 'transcript.final', utteranceId: 'u2', text: 'secret' });
+    assert.equal(t.c.state.reply, '');
+    assert.equal(t.c.state.transcript, '');
+    t.c.dispose();
+  });
+
+  it('after signing out and back in, the first call is a normal fresh call with a greeting', async () => {
+    const t = scripted();
+    t.active();
+    t.c.endConversation();
+    t.c.setConnected(true);
+    t.c.command('summon');
+    await new Promise((r) => setTimeout(r, 5));
+
+    assert.equal(t.starts.length, 1, 'a session was started');
+    assert.equal(t.c.state.reply, '');
+    t.server({ type: 'session.ready', sessionId: 's2', audio: t.fmt });
+    t.server({ type: 'assistant.text.delta', turnId: 'turn-9', text: 'Hi.' });
+    assert.equal(t.c.state.reply, 'Hi.', 'the greeting is shown, not discarded as if aborted');
+    t.c.dispose();
+  });
+
   it('hanging up while the session is still starting silences the greeting that follows', async () => {
     const sent: ClientMessage[] = [];
     const audio = new FakeAudio(Number.POSITIVE_INFINITY);

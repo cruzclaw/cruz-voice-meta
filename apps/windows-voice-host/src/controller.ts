@@ -329,6 +329,22 @@ export class HostController {
     this.emit();
   }
 
+  /**
+   * The person signed out. Everything stops at once (listening, speaking, timers) and nothing of the conversation
+   * stays: not the words on the panel, not the open tasks, not the idea that a session is running.
+   */
+  endConversation(): void {
+    this.stopAll();
+    this.greeting = false;
+    // A session still being opened finishes (and is silenced) by itself; only then does the flag have anything to cancel.
+    if (this.starting) this.abortStart = true;
+    this.discardReply = true;
+    this.expectedUtterance = 'interrupted'; // a transcript the old connection still sends matches nothing
+    // One step: the state goes back to its start (not connected, no session, no words), so no panel update in between
+    // can show the old words under the new epoch.
+    this.dispatch({ kind: 'ui', action: { type: 'signed_out' } });
+  }
+
   /** Stops timers and devices. Call when the app quits. */
   dispose(): void {
     this.stopAll();

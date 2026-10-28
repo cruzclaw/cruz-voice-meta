@@ -234,19 +234,21 @@ export class MetaReasoner implements Reasoner {
     }
   }
 
-  /** Which tool the model called: its own statement if there is one, otherwise the shape of the arguments. */
+  /**
+   * Which tool the model called: its own statement (the call's name, or the name it announced for the call's item id).
+   * A host tool is never guessed from the shape of its arguments, because two tools can take the same arguments and a
+   * wrong guess would do the wrong thing (read what the person meant to skip). Without a name, only the one shape that
+   * belongs to propose_task is accepted, and only when the host has added no tools of its own; otherwise the call is
+   * ignored and the person can ask again.
+   */
   private toolNameFor(call: { name?: unknown; item_id?: unknown }, args: unknown, names: Map<string, string>): string | undefined {
     const known = new Set(this.tools.map((t) => t.name));
     const said = typeof call.name === 'string' ? call.name : typeof call.item_id === 'string' ? names.get(call.item_id) : undefined;
     if (said !== undefined) return known.has(said) ? said : undefined;
-    if (!args || typeof args !== 'object') return 'propose_task';
-    const keys = Object.keys(args as object);
-    if (keys.includes('intent')) return 'propose_task';
-    for (const tool of this.options.extension?.tools ?? []) {
-      const required = (tool.parameters as { required?: string[] }).required ?? [];
-      if (required.length > 0 && required.every((k) => keys.includes(k))) return tool.name;
-    }
-    return 'propose_task';
+    const hostTools = (this.options.extension?.tools ?? []).length > 0;
+    if (!hostTools) return 'propose_task';
+    const isTask = !!args && typeof args === 'object' && Object.keys(args as object).includes('intent');
+    return isTask ? 'propose_task' : undefined;
   }
 
   private async runExtensionCall(name: string, args: unknown, input: ReasonerInput, signal: AbortSignal): Promise<ReadonlyArray<ReasonerEvent>> {

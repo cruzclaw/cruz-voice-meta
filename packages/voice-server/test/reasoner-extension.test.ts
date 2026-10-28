@@ -113,11 +113,28 @@ describe('reasoner extension: tools', () => {
     assert.match(memory, /\(Read an item aloud\.\)/);
   });
 
-  it('finds the tool by the arguments when the model does not say which one it called', async () => {
+  it('never guesses a host tool from the arguments: a call with no name, and no announced name, does nothing', async () => {
     const calls: string[] = [];
-    const r = make({ tools: READ_TOOLS, call: async (name) => { calls.push(name); return []; } }, [call(undefined, { ref: 'a1' })]);
-    await run(r);
-    assert.deepEqual(calls, ['read_item']); // the first tool whose required fields match
+    // read_item and pass_item take the same arguments, so a guess would read what the person meant to skip.
+    const r = make({ tools: READ_TOOLS, call: async (name) => { calls.push(name); return [{ type: 'text', text: 'PRIVATE CONTENT' }]; } }, [call(undefined, { ref: 'a1' })]);
+    const out = await run(r);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(out, []);
+  });
+
+  it('ignores a call whose item id was never announced, and one announced under a name it was not offered', async () => {
+    const calls: string[] = [];
+    const ext: ReasonerExtension = { tools: READ_TOOLS, call: async (name) => { calls.push(name); return []; } };
+    const unknownId = await run(make(ext, [call(undefined, { ref: 'a1' }, { item_id: 'fc_404' })]));
+    const announced = ev('response.output_item.added', { item: { type: 'function_call', id: 'fc_1', name: 'delete_everything' } });
+    const badName = await run(make(ext, [announced + call(undefined, { ref: 'a1' }, { item_id: 'fc_1' })]));
+    assert.deepEqual(calls, []);
+    assert.deepEqual([unknownId, badName], [[], []]);
+  });
+
+  it('still treats an unnamed call as a task when the host adds no tools of its own', async () => {
+    const out = await run(make({ context: async () => 'x' }, [call(undefined, { intent: 'send_email', to: 'a@b.co', subject: 's', body: 'b' })]));
+    assert.equal(out[0]?.type, 'task');
   });
 
   it('finds the tool by the item id the model announced earlier', async () => {
