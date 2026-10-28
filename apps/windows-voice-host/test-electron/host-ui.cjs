@@ -29,8 +29,9 @@ for (const method of ['show', 'focus', 'moveTop', 'setAlwaysOnTop']) {
 
 app.whenReady().then(async () => {
   console.log(`display scale factor ${screen.getPrimaryDisplay().scaleFactor}`);
+  let resolves = 0;
   const host = createVoiceHost({
-    connection: { resolve: async () => { throw new Error('offline'); } },
+    connection: { resolve: async () => { resolves += 1; throw new Error('offline'); } },
     assetsDir: dist,
     deviceSpeech: false,
     shortcutLabel: 'Ctrl+Shift+Space',
@@ -46,6 +47,7 @@ app.whenReady().then(async () => {
   const KINDS = { update: { update: 1 }, approval: { approval: 1 }, acknowledgement: { acknowledgement: 1 }, error: { error: 1 } };
 
   check(!win(), 'no window exists before anything is waiting');
+  check(resolves === 0, 'nothing connects to the server until the person asks for a call');
 
   // 1. An update arrives while no panel is open.
   host.setAttention(counts({ update: 2 }));
@@ -135,6 +137,13 @@ app.whenReady().then(async () => {
   host.setAttention(counts({}));
   await wait(400);
   check(win().isVisible(), 'and clearing it does not close a panel the person opened');
+
+  // 7. The first press is what opens the connection.
+  host.press();
+  await wait(800);
+  check(resolves >= 1, 'pressing Call opens the connection');
+  host.hangUp();
+  focusGrabs.length = 0;
 
   check(focusGrabs.length === 0, `nothing in this whole run asked the system to focus or raise a window (${focusGrabs.join(', ') || 'no calls'})`);
   console.log(failures === 0 ? 'ALL PASSED' : `${failures} FAILED`);

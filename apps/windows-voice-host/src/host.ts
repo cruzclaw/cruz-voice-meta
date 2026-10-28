@@ -70,7 +70,7 @@ export interface VoiceHostOptions {
 
 export interface VoiceHost {
   readonly controller: HostController;
-  /** Opens a connection (retrying) so the first press can start a call. */
+  /** Opens a connection (retrying) now. Without this, the first press opens it. */
   start(): void;
   press(): void;
   hangUp(): void;
@@ -128,6 +128,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   /** The panel is wanted before its page has loaded: show it, and as the bar or the full panel, as soon as it can. */
   let pendingShow = false;
   let pendingBar = false;
+  /** The person asked for a call before the connection was up. It starts as soon as it is. */
+  let pendingPress = false;
 
   /** Chunks handed to the speaker since playback last stopped, and whether any may still be audible. */
   let chunksSent = 0;
@@ -370,6 +372,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       // A wrong password or an account without voice will not fix itself, and retrying would only repeat the attempt.
       if (e instanceof ConnectionError && e.fatal) {
         log(`${e.message} Fix this and start the app again.`);
+        pendingPress = false;
         controller.showProblem(e.message);
         options.onProblem?.(e.message);
         return;
@@ -382,6 +385,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     reconnectWait = 2000;
     controller.setConnected(true);
     log('connected');
+    if (pendingPress) {
+      pendingPress = false;
+      controller.press();
+    }
   }
 
   function scheduleReconnect(): void {
@@ -533,6 +540,12 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     press: () => {
       shownForAttention = false;
       showPanelSilently();
+      // Not connected yet: connect now, and start the call when it is. Nothing connects before the first press.
+      if (!controller.state.connected) {
+        pendingPress = true;
+        void connectOnce();
+        return;
+      }
       controller.press();
     },
     hangUp: () => controller.hangUp(),
