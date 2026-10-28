@@ -88,4 +88,10 @@ describe('the panel pages', () => {
     assert.match(css, /\.mic\[data-mic="wake"\]/);
     assert.match(css, /\.mini-mic/);
   });
+
+  it('keep the strip crisp on the small bar, and keep the content of the bar out from under it', () => {
+    assert.match(css, /body\.is-mini \.seg\s*\{[^}]*box-shadow:\s*none/);
+    assert.match(css, /\.mini\s*\{[^}]*padding:\s*4px /, 'the bar starts below the 4px strip');
+    assert.match(css, /\.hue\s*\{[^}]*height:\s*4px/);
+  });
 });

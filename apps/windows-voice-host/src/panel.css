@@ -202,7 +202,10 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 }
 
 /* ---- Minimised: a thin bar above the taskbar with the state, Mute and Call or Hang up ---- */
-.mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 0 6px 0 10px; }
+/* The top 4px belong to the attention strip, so the bar's own content starts below it and never overlaps it. */
+.mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 4px 6px 0 10px; }
+/* Small bar: the strip stays crisp, with no glow spilling onto the buttons and words under it. */
+body.is-mini .seg { box-shadow: none; }
 body.is-mini { border-radius: 8px; }
 body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag, body.is-mini .attn-chip { display: none; }
 body.is-mini .mini { display: flex; }

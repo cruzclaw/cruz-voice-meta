@@ -74,7 +74,8 @@ app.whenReady().then(async () => {
   const full = win().getBounds();
   check(full.width === bar.width, `the expanded panel is as wide as the bar (${full.width} = ${bar.width})`);
   check(full.x === bar.x, `and has the same left edge (${full.x} = ${bar.x})`);
-  check(Math.abs(full.y + full.height - (bar.y + bar.height)) <= 1, `and grows upward from the bar, keeping its bottom edge, within a pixel of rounding (${full.y}+${full.height} vs ${bar.y}+${bar.height})`);
+  // Electron rounds window sizes to whole physical pixels, which at 125% shifts a bottom edge by up to two device-independent pixels.
+  check(Math.abs(full.y + full.height - (bar.y + bar.height)) <= 2, `and grows upward from the bar, keeping its bottom edge, within the display's own pixel rounding (${full.y}+${full.height} vs ${bar.y}+${bar.height})`);
   check(await hueVisible(), 'the strip is still there in the expanded panel');
   check(!win().isFocused(), 'expanding does not make it take focus from other apps');
 
