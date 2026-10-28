@@ -145,23 +145,23 @@ describe('reasoner extension: tools', () => {
     assert.deepEqual(calls, ['pass_item']);
   });
 
-  it('still proposes a task when the model calls propose_task, or sends task-shaped arguments with no name', async () => {
+  it('still proposes a task when the model calls propose_task by name, next to host tools', async () => {
     const calls: string[] = [];
     const ext: ReasonerExtension = { tools: READ_TOOLS, call: async (name) => { calls.push(name); return []; } };
     const task = { intent: 'send_email', to: 'a@b.co', subject: 's', body: 'b' };
     const named = await run(make(ext, [call('propose_task', task)]));
-    const unnamed = await run(make(ext, [call(undefined, task)]));
     assert.equal(named[0]?.type, 'task');
-    assert.equal(unnamed[0]?.type, 'task');
     assert.deepEqual(calls, []);
   });
 
-  it('treats arguments with an intent as a task even if a host tool happens to need only fields they also have', async () => {
+  it('ignores an unnamed call, even a task-shaped one, when the host has tools: nothing is guessed', async () => {
     const calls: string[] = [];
     const bodyTool = { name: 'note_it', description: 'x', parameters: { type: 'object', properties: { body: { type: 'string' } }, required: ['body'] } };
-    const r = make({ tools: [bodyTool], call: async (name) => { calls.push(name); return []; } }, [call(undefined, { intent: 'send_email', to: 'a@b.co', subject: 's', body: 'b' })]);
-    const out = await run(r);
-    assert.equal(out[0]?.type, 'task');
+    const task = { intent: 'send_email', to: 'a@b.co', subject: 's', body: 'b' };
+    for (const tools of [READ_TOOLS, [bodyTool]]) {
+      const out = await run(make({ tools, call: async (name) => { calls.push(name); return []; } }, [call(undefined, task)]));
+      assert.deepEqual(out, []);
+    }
     assert.deepEqual(calls, []);
   });
 

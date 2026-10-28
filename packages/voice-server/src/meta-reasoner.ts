@@ -194,7 +194,7 @@ export class MetaReasoner implements Reasoner {
           } catch {
             args = undefined;
           }
-          const name = this.toolNameFor(call, args, names);
+          const name = this.toolNameFor(call, names);
           if (name === undefined) continue; // A tool that was never offered is ignored.
           if (++toolCalls > MAX_TOOL_CALLS_PER_TURN) continue; // A model that keeps calling tools gets no further.
           if (name !== 'propose_task') {
@@ -236,19 +236,16 @@ export class MetaReasoner implements Reasoner {
 
   /**
    * Which tool the model called: its own statement (the call's name, or the name it announced for the call's item id).
-   * A host tool is never guessed from the shape of its arguments, because two tools can take the same arguments and a
-   * wrong guess would do the wrong thing (read what the person meant to skip). Without a name, only the one shape that
-   * belongs to propose_task is accepted, and only when the host has added no tools of its own; otherwise the call is
-   * ignored and the person can ask again.
+   * Nothing is ever guessed from the shape of the arguments, because two tools can take the same arguments and a wrong
+   * guess would do the wrong thing (read what the person meant to skip). A call with no name is ignored, and the person
+   * can ask again, whenever the host has added tools of its own. Only when there are none is an unnamed call taken as
+   * propose_task, which is the one tool then on offer.
    */
-  private toolNameFor(call: { name?: unknown; item_id?: unknown }, args: unknown, names: Map<string, string>): string | undefined {
+  private toolNameFor(call: { name?: unknown; item_id?: unknown }, names: Map<string, string>): string | undefined {
     const known = new Set(this.tools.map((t) => t.name));
     const said = typeof call.name === 'string' ? call.name : typeof call.item_id === 'string' ? names.get(call.item_id) : undefined;
     if (said !== undefined) return known.has(said) ? said : undefined;
-    const hostTools = (this.options.extension?.tools ?? []).length > 0;
-    if (!hostTools) return 'propose_task';
-    const isTask = !!args && typeof args === 'object' && Object.keys(args as object).includes('intent');
-    return isTask ? 'propose_task' : undefined;
+    return (this.options.extension?.tools ?? []).length > 0 ? undefined : 'propose_task';
   }
 
   private async runExtensionCall(name: string, args: unknown, input: ReasonerInput, signal: AbortSignal): Promise<ReadonlyArray<ReasonerEvent>> {
