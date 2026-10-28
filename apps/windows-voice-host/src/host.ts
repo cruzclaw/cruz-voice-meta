@@ -603,6 +603,13 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     speakerBusy = false;
     controller.onPlaybackDrained();
   });
+  on('playback-failed', (event, stops: unknown, reason: unknown) => {
+    // The audio window could not play what it was given. Same stale check as a start: a report from before the last stop is not about this reply.
+    if (!fromAudio(event) || stops !== stopsSent) return;
+    const why = typeof reason === 'string' ? reason.slice(0, 120) : 'unknown';
+    log(`speaker: playback failed: ${why}`);
+    controller.onPlaybackFailed(why);
+  });
   on('playback-started', (event, stops: unknown) => {
     // Sound has begun in the audio window. A report from before the last stop belongs to a reply that was cut off.
     if (!fromAudio(event) || stops !== stopsSent) return;

@@ -13,9 +13,11 @@ export interface DeviceSpeechOptions {
   play(pcm: Uint8Array): void;
   /** Speech could not be made. The text of the reply is still on screen. */
   onError?(error: unknown): void;
+  /** Sound was handed to the speaker and none was heard: the speaker said so, or said nothing at all. */
+  onPlaybackFailed?(reason: string): void;
   /** Whether the speaker may still be making sound. The reply is over only when it is quiet. */
   isPlaying?(): boolean;
-  /** How long to wait for the speaker to say it has begun, before saying Speaking anyway. */
+  /** How long to wait for the speaker to confirm sound before treating playback as failed. */
   audibleTimeoutMs?: number;
   /** How long to wait for the speaker to say it is quiet, before ending the reply anyway. */
   quietTimeoutMs?: number;
@@ -36,10 +38,13 @@ const SENTENCE_END = /(?<=[.!?])\s+/;
  * without waiting for the whole answer. It reports what it does as the same tts.start and tts.end
  * messages a server that speaks would send, so the panel and the call logic need no second path.
  *
- * tts.start follows the speaker, not the voice: it is sent when the audio window says sound has begun (onAudible), and
- * tts.end when the speaker says it is quiet (onQuiet). Making the first sentence can take seconds, and playing the
- * last one takes seconds more, and the panel must not say Speaking for the first or stop saying it for the second.
- * If the speaker never reports, the panel is not left stuck: a timer says it anyway.
+ * tts.start follows the speaker, never the voice and never a timer: it is sent only when the audio window confirms
+ * sound (onAudible), and tts.end when the speaker says it is quiet (onQuiet). Making the first sentence can take
+ * seconds, and playing the last one takes seconds more, and the panel must not say Speaking for the first or stop
+ * saying it for the second.
+ *
+ * If sound was handed over and the speaker never confirms it, or says it cannot play, nothing is shown as speaking.
+ * The reply is dropped, the failure is reported (onPlaybackFailed) and the rest of that reply is ignored.
  */
 export class DeviceSpeech {
   private active = false;
@@ -50,10 +55,12 @@ export class DeviceSpeech {
   private started = false;
   /** tts.start has been sent for this reply. */
   private announced = false;
-  /** Sound has been handed to the speaker and its beginning is awaited. */
+  /** Sound has been handed to the speaker and its confirmation is awaited. */
   private awaitingAudible = false;
   /** Everything of this reply has been made, and its end waits for the speaker to be quiet. */
   private finishing = false;
+  /** The reply whose playback failed: what is still streaming in for it is not spoken. */
+  private failedTurn: string | undefined;
   private currentTurn: string | undefined;
   private audibleTimer: ReturnType<typeof setTimeout> | undefined;
   private quietTimer: ReturnType<typeof setTimeout> | undefined;
@@ -66,12 +73,14 @@ export class DeviceSpeech {
   /** A session has started. `on` says whether this session leaves the speaking to the device. */
   reset(on: boolean): void {
     this.cancel();
+    this.failedTurn = undefined;
     this.active = on;
   }
 
   /** Feed every server message through here. Anything that is not about the reply is ignored. */
   onMessage(message: ServerMessage): void {
     if (!this.active) return;
+    if ((message.type === 'assistant.text.delta' || message.type === 'assistant.text.done') && message.turnId === this.failedTurn) return;
     if (message.type === 'assistant.text.delta') {
       if (message.turnId !== this.turnId) {
         // A new reply replaces an old one that was still being spoken.
@@ -111,14 +120,22 @@ export class DeviceSpeech {
     clearTimeout(this.quietTimer);
   }
 
-  /** The speaker says sound has begun. Only counts for a reply whose sound is being awaited. */
+  /** The speaker confirms sound has begun. Only counts for a reply whose sound is being awaited. */
   onAudible(): void {
     if (this.awaitingAudible && !this.announced) this.announce(this.currentTurn);
   }
 
+  /** The speaker says it could not play what it was given. Only counts for a reply whose sound is being awaited. */
+  onFailed(reason: string): void {
+    if (this.awaitingAudible && !this.announced) this.fail(reason);
+  }
+
   /** The speaker says it is quiet. Ends a reply that has been completely made. */
   onQuiet(): void {
-    if (this.finishing) this.end();
+    if (!this.finishing) return;
+    // Sound that played all the way through was audible, even if its start report has not arrived yet.
+    if (this.awaitingAudible && !this.announced) this.announce(this.currentTurn);
+    this.end();
   }
 
   private enqueue(text: string): void {
@@ -135,18 +152,24 @@ export class DeviceSpeech {
     this.options.emit({ v: 1, seq: 0, type: 'tts.start', ttsId: `local-${turnId}`, turnId: turnId ?? 'local', audio: SPEECH_FORMAT });
   }
 
-  /** The reply is over: Speaking, if it was said, is closed first, so the panel always sees a start and then an end. */
+  /** The reply is over. Speaking is closed only if it was ever said: a reply that was not heard is not shown as spoken. */
   private end(): void {
     clearTimeout(this.quietTimer);
     const turnId = this.currentTurn;
 
-    if (!this.announced) this.announce(turnId);
     this.started = false;
     this.announced = false;
     this.awaitingAudible = false;
     this.finishing = false;
     this.done = false;
     this.options.emit({ v: 1, seq: 0, type: 'tts.end', ttsId: `local-${turnId}` });
+  }
+
+  /** Nothing was heard: the reply is dropped, what is left of it is ignored, and the failure is reported. */
+  private fail(reason: string): void {
+    this.failedTurn = this.currentTurn;
+    this.cancel();
+    this.options.onPlaybackFailed?.(reason);
   }
 
   /** One loop at a time takes pieces off the queue in order. */
@@ -164,12 +187,12 @@ export class DeviceSpeech {
         for await (const chunk of this.options.synthesize(piece, signal)) {
           if (signal.aborted) return;
           this.options.play(chunk);
-          // Speaking is said when the speaker reports sound, or after a while if it never does.
+          // Speaking waits for the speaker's own confirmation. If it does not come, playback has failed.
           if (!this.announced && !this.awaitingAudible) {
             this.awaitingAudible = true;
             this.audibleTimer = setTimeout(() => {
-              if (this.awaitingAudible && !this.announced && !signal.aborted) this.announce(turnId);
-            }, this.options.audibleTimeoutMs ?? 1500);
+              if (this.awaitingAudible && !this.announced && !signal.aborted) this.fail('The speaker did not confirm any sound.');
+            }, this.options.audibleTimeoutMs ?? 4000);
           }
         }
       }
@@ -184,8 +207,8 @@ export class DeviceSpeech {
     // Pieces may have arrived while the last one was being made.
     if (this.queue.length > 0) return void this.run();
     if (this.done && this.started) {
-      // Everything has been made. It is over when the speaker has said everything it was given. With no sound at all
-      // (nothing was playing) it is over now, and still opens and closes, so the panel sees an ordinary reply.
+      // Everything has been made. It is over when the speaker has said everything it was given. With nothing playing
+      // it is over now, and closes without ever having said Speaking.
       this.finishing = true;
       if (this.options.isPlaying?.()) {
         this.quietTimer = setTimeout(() => {

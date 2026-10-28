@@ -72,7 +72,9 @@ export type UiAction =
   /** The person cut the assistant off, while it was thinking or speaking. */
   | { type: 'interrupted' }
   /** A session could not be opened. */
-  | { type: 'session_failed'; message: string };
+  | { type: 'session_failed'; message: string }
+  /** A reply could not be played: nothing was heard. The text of the reply stays on screen. It is never shown as speaking. */
+  | { type: 'playback_failed'; message: string };
 
 export type PanelEvent =
   | { kind: 'server'; message: ServerMessage }
@@ -202,6 +204,8 @@ function reduceUi(s: PanelState, a: UiAction): PanelState {
       return s.phase === 'thinking' || s.phase === 'speaking' ? { ...s, phase: 'idle', replyDone: false } : s;
     case 'session_failed':
       return { ...s, phase: 'idle', lastError: { code: 'SESSION', message: a.message.slice(0, 200), retryable: true } };
+    case 'playback_failed':
+      return { ...s, phase: s.phase === 'thinking' || s.phase === 'speaking' ? 'idle' : s.phase, replyDone: false, lastError: { code: 'PLAYBACK', message: a.message.slice(0, 200), retryable: true } };
     case 'listen_cancel':
       // A follow-up window that simply went unused is not an error.
       if (a.quiet) return s.phase === 'listening' ? { ...s, phase: 'idle' } : s;

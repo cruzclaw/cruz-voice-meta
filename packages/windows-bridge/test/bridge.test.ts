@@ -223,6 +223,18 @@ describe('controls', () => {
     assert.equal(failed.lastError?.message, 'refused');
   });
 
+  it('a reply that could not be played is an error, never speaking, and leaves the panel idle with the message', () => {
+    const thinking = run([ui({ type: 'listen_start' }), ui({ type: 'listen_end' }), ui({ type: 'playback_failed', message: 'No sound could be played.' })], ready());
+    assert.equal(displayState(thinking), 'idle');
+    assert.deepEqual(thinking.lastError, { code: 'PLAYBACK', message: 'No sound could be played.', retryable: true });
+    // Even if it had been said to be speaking, a failure to play takes it back.
+    const speaking = run([server({ type: 'tts.start', ttsId: 't', turnId: 'x', audio }), ui({ type: 'playback_failed', message: 'No sound could be played.' })], ready());
+    assert.equal(displayState(speaking), 'idle');
+    // A listening panel is not interrupted by it.
+    const listening = run([ui({ type: 'listen_start' }), ui({ type: 'playback_failed', message: 'x' })], ready());
+    assert.equal(displayState(listening), 'listening');
+  });
+
   it('summon while listening ends the input; while disconnected or muted it only shows', () => {
     const listening = run([ui({ type: 'listen_start' })], ready());
     assert.deepEqual(sent(listening, 'summon'), ['input.end']);

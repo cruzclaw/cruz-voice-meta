@@ -157,14 +157,26 @@ function play(pcm) {
   };
 }
 
-// Playback has really begun when the first chunk's start time has come, plus what the output device adds. Until
-// then the sound is only scheduled. A stop in between cancels the report.
+// Playback has really begun only when the AUDIO clock has passed the first chunk's start time, plus what the output
+// device adds. A wall-clock timer would say so even with a stopped or suspended output; the audio clock only moves while
+// the device is consuming audio. If it has not moved far enough within AUDIBLE_DEADLINE_MS, playback has failed, and
+// that is said, with the reason. A stop in between cancels the report either way.
+const AUDIBLE_DEADLINE_MS = 2000;
 function reportWhenAudible(startsAt) {
   const mine = stops;
-  const wait = Math.max(0, (startsAt - context.currentTime + (context.outputLatency || 0)) * 1000);
-  setTimeout(() => {
-    if (stops === mine) window.hostAudio.started(stops);
-  }, wait);
+  const since = performance.now();
+  const timer = setInterval(() => {
+    if (stops !== mine) return clearInterval(timer);
+    if (context.state !== 'running') void context.resume();
+    const due = startsAt + (context.outputLatency || 0);
+    if (context.state === 'running' && context.currentTime >= due) {
+      clearInterval(timer);
+      window.hostAudio.started(stops);
+    } else if (performance.now() - since > AUDIBLE_DEADLINE_MS) {
+      clearInterval(timer);
+      window.hostAudio.failed(stops, context.state === 'running' ? 'the audio clock did not advance' : `the audio output is ${context.state}`);
+    }
+  }, 10);
 }
 
 function stopPlayback() {
