@@ -123,6 +123,8 @@ let playedSamples = 0;
 let peak = 0;
 // Chunks started since playback last stopped. The main process compares it with how many it sent.
 let chunkCount = 0;
+// How many times playback was stopped. Reports carry it, so one from before a stop is never taken for a later reply.
+let stops = 0;
 
 function play(pcm) {
   if (context.state !== 'running') void context.resume();
@@ -139,10 +141,13 @@ function play(pcm) {
   node.buffer = buffer;
   node.connect(speaker);
   // Chain chunks back to back, with a small lead so the first one is not clipped.
+  const first = playing.size === 0;
   playAt = Math.max(playAt, context.currentTime + 0.05);
-  node.start(playAt);
+  const startsAt = playAt;
+  node.start(startsAt);
   playAt += buffer.duration;
   playing.add(node);
+  if (first) reportWhenAudible(startsAt);
   if (playedSamples === 0) window.hostAudio.info(`speaker: first chunk, audio ${context.state} at ${context.sampleRate} Hz`);
   playedSamples += samples.length;
   chunkCount++;
@@ -152,7 +157,18 @@ function play(pcm) {
   };
 }
 
+// Playback has really begun when the first chunk's start time has come, plus what the output device adds. Until
+// then the sound is only scheduled. A stop in between cancels the report.
+function reportWhenAudible(startsAt) {
+  const mine = stops;
+  const wait = Math.max(0, (startsAt - context.currentTime + (context.outputLatency || 0)) * 1000);
+  setTimeout(() => {
+    if (stops === mine) window.hostAudio.started(stops);
+  }, wait);
+}
+
 function stopPlayback() {
+  stops++;
   for (const node of playing) {
     node.onended = null;
     try {

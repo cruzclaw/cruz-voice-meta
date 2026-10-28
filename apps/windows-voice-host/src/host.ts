@@ -186,6 +186,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   /** Chunks handed to the speaker since playback last stopped, and whether any may still be audible. */
   let chunksSent = 0;
   let speakerBusy = false;
+  /** Stops sent to the audio window since it opened. Its reports carry its own count, so a stale one is told apart. */
+  let stopsSent = 0;
 
   // ---- the device voice, in its own process ----
 
@@ -217,6 +219,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (!audioWindow || audioWindow.isDestroyed()) {
       audioReady = false;
       audioBacklog = [];
+      // A new window counts its stops from none.
+      stopsSent = 0;
       audioWindow = createAudioWindow();
       if (speech) void speech.warmUp().then((ok) => log(ok ? 'voice is ready' : 'the voice could not be loaded. Replies will show as text only.'));
     }
@@ -246,7 +250,9 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     stopPlayback: () => {
       chunksSent = 0;
       speakerBusy = false;
-      toAudio(audioIfOpen(), 'stop-playback');
+      const open = audioIfOpen();
+      if (open) stopsSent++;
+      toAudio(open, 'stop-playback');
     },
     isPlaying: () => speakerBusy,
     chime: (kind) => toAudio(needAudio(), 'chime', kind),
@@ -588,6 +594,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (!fromAudio(event) || count !== chunksSent) return;
     speakerBusy = false;
     controller.onPlaybackDrained();
+  });
+  on('playback-started', (event, stops: unknown) => {
+    // Sound has begun in the audio window. A report from before the last stop belongs to a reply that was cut off.
+    if (!fromAudio(event) || stops !== stopsSent) return;
+    controller.onPlaybackStarted();
   });
   on('audio-ready', (event) => {
     if (!fromAudio(event) || !audioWindow) return;

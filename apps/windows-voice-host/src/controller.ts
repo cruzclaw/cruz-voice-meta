@@ -138,7 +138,11 @@ export class HostController {
         synthesize: options.speak,
         // What the device says is reported like what a server says, so the state machine has one path.
         emit: (message) => this.onServer(message, true),
-        play: (pcm) => this.onSpeech(pcm),
+        // The device voice plays as it is made. It is cut off at its source (DeviceSpeech.cancel), so it needs no state gate.
+        play: (pcm) => {
+          if (!this.discardReply) this.audio.play(pcm);
+        },
+        isPlaying: () => this.audio.isPlaying(),
         ...(options.onSpeechError ? { onError: options.onSpeechError } : {}),
       });
     }
@@ -213,8 +217,14 @@ export class HostController {
     this.emit();
   }
 
+  /** The audio window says sound has begun: this is when Speaking is true. */
+  onPlaybackStarted(): void {
+    this.deviceSpeech?.onAudible();
+  }
+
   /** The speaker has finished everything it was given. */
   onPlaybackDrained(): void {
+    this.deviceSpeech?.onQuiet();
     if (!this.listenWhenDrained) return;
     this.listenWhenDrained = false;
     this.command('summon');
