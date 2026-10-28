@@ -26,10 +26,9 @@ describe('the playback-started report', () => {
     assert.match(renderer, /if \(stops === mine\) window\.hostAudio\.started\(stops\);/);
   });
 
-  it('measures from the end of the person's speech to the first sound they hear, once per reply', () => {
+  it('measures from the end of the speech of the person to the first sound they hear, once per reply', () => {
     assert.match(host, /if \(message\.type === 'input\.end'\) inputEndedAt = Date\.now\(\);/);
-    assert.match(host, /if \(inputEndedAt\) log\(`latency: first sound \$\{now - inputEndedAt\} ms after the end of speech`\);?
-\s+inputEndedAt = 0;/);
+    assert.match(host, /if \(inputEndedAt\) log\(`latency: first sound \$\{now - inputEndedAt\} ms after the end of speech`\);\r?\n\s+inputEndedAt = 0;/);
   });
 
   it('crosses the preload bridge on its own channel', () => {
