@@ -55,6 +55,11 @@ export interface VoiceHostOptions {
   followUp?: boolean;
   /** Where the wake phrase model was unpacked. Wake listening stays off until enableWake() is called. */
   wakeModelDir?: string;
+  /**
+   * Where the voice model is kept. It is about 90 MB and downloaded the first time it is needed, so it must be a
+   * folder the app can write to, such as one under the user's app data. Defaults to the package's own folder.
+   */
+  modelCacheDir?: string;
   /** Save the last thing the microphone heard as a WAV file in the temp folder. */
   debugDump?: boolean;
   log?: (line: string) => void;
@@ -140,7 +145,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   const speech =
     deviceSpeech && options.speechProcessFile
       ? new SpeechClient((): SpeechChild => {
-          const child = utilityProcess.fork(options.speechProcessFile!, [], { serviceName: 'CruzClaw voice', stdio: 'inherit' });
+          const child = utilityProcess.fork(options.speechProcessFile!, [], {
+            serviceName: 'CruzClaw voice',
+            stdio: 'inherit',
+            env: { ...process.env, ...(options.modelCacheDir ? { VOICE_MODEL_CACHE: options.modelCacheDir } : {}) },
+          });
           return {
             endpoint: { post: (message) => child.postMessage(message), onMessage: (listener) => void child.on('message', listener) },
             onExit: (listener) => void child.on('exit', listener),
@@ -151,22 +160,38 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
 
   // ---- the speaker and microphone ----
 
+  /**
+   * The audio window (microphone and speaker) and the voice model are created the first time they are needed:
+   * a call, a chime, the wake phrase or a speaker test. An app that only shows the attention strip never opens
+   * the microphone, never starts the speech process and never downloads the model.
+   */
+  const needAudio = (): BrowserWindow | undefined => {
+    if (disposed) return undefined;
+    if (!audioWindow || audioWindow.isDestroyed()) {
+      audioWindow = createAudioWindow();
+      if (speech) void speech.warmUp().then((ok) => log(ok ? 'voice is ready' : 'the voice could not be loaded. Replies will show as text only.'));
+    }
+    return audioWindow;
+  };
+  /** Stopping something that was never started must not start the audio window. */
+  const audioIfOpen = (): BrowserWindow | undefined => (audioWindow && !audioWindow.isDestroyed() ? audioWindow : undefined);
+
   const audio: AudioDevice = {
-    startCapture: () => audioWindow?.webContents.send('capture', true),
-    stopCapture: () => audioWindow?.webContents.send('capture', false),
+    startCapture: () => needAudio()?.webContents.send('capture', true),
+    stopCapture: () => audioIfOpen()?.webContents.send('capture', false),
     play: (pcm) => {
       chunksSent++;
       speakerBusy = true;
-      audioWindow?.webContents.send('play', pcm);
+      needAudio()?.webContents.send('play', pcm);
     },
     stopPlayback: () => {
       chunksSent = 0;
       speakerBusy = false;
-      audioWindow?.webContents.send('stop-playback');
+      audioIfOpen()?.webContents.send('stop-playback');
     },
     isPlaying: () => speakerBusy,
-    chime: (kind) => audioWindow?.webContents.send('chime', kind),
-    listenForWake: (on) => audioWindow?.webContents.send('wake-mic', on),
+    chime: (kind) => needAudio()?.webContents.send('chime', kind),
+    listenForWake: (on) => (on ? needAudio() : audioIfOpen())?.webContents.send('wake-mic', on),
   };
 
   const controller = new HostController(
@@ -496,7 +521,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   });
   on('audio-ready', (event) => {
     // The audio window loads after the connection may already be up, so tell it what to do now.
-    if (fromAudio(event) && controller.wakeListening) audioWindow?.webContents.send('wake-mic', true);
+    if (fromAudio(event) && controller.wakeListening) audioIfOpen()?.webContents.send('wake-mic', true);
   });
   on('audio-info', (event, message: unknown) => {
     if (!fromAudio(event)) return;
@@ -531,8 +556,6 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   on('panel-attention-open', (event) => void (fromPanel(event) && options.onAttentionOpen?.()));
 
   // ---- the handle ----
-
-  audioWindow = createAudioWindow();
 
   const host: VoiceHost = {
     controller,
@@ -591,11 +614,12 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     get wakeOn() {
       return !!wakeDetector;
     },
-    testSpeaker: () => audioWindow?.webContents.send('beep'),
+    testSpeaker: () => needAudio()?.webContents.send('beep'),
     async selfTest() {
       // Proves the voice path on this machine without a server: the speech process makes a phrase, it goes to the
       // speaker, and the speaker's own level meter hears it.
       if (!speech) return { ok: false, reason: 'device speech is off' };
+      needAudio();
       const started = Date.now();
       let bytes = 0;
       let firstAudioMs = -1;
@@ -626,9 +650,6 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       audioWindow = undefined;
     },
   };
-
-  // Speech model: load it in the background so the first reply is not slowed by it.
-  if (speech) void speech.warmUp().then((ok) => log(ok ? 'voice is ready' : 'the voice could not be loaded. Replies will show as text only.'));
 
   return host;
 }

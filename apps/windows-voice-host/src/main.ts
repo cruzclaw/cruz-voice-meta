@@ -108,6 +108,7 @@ if (!app.requestSingleInstanceLock()) {
       endSilenceMs: END_SILENCE_MS,
       followUp: FOLLOW_UP,
       wakeModelDir: WAKE_MODEL_DIR,
+      ...(process.env.VOICE_MODEL_CACHE_DIR ? { modelCacheDir: process.env.VOICE_MODEL_CACHE_DIR } : {}),
       debugDump: DUMP,
       log,
       onChange: (_state, display) => {
@@ -145,6 +146,9 @@ if (!app.requestSingleInstanceLock()) {
           if (r.ok) log(`selftest: made ${r.seconds?.toFixed(1)} s of speech, first audio after ${r.firstAudioMs} ms, loudest speaker level ${r.peakLevel?.toFixed(3)}`);
           log(r.ok ? 'selftest: PASS, the voice reached the speaker' : `selftest: FAIL, ${r.reason ?? 'the speaker stayed silent'}`);
           app.exit(r.ok ? 0 : 2);
+        }, (e: unknown) => {
+          log(`selftest: FAIL, ${e instanceof Error ? e.message : 'unexpected error'}`);
+          app.exit(3);
         });
       }, 1500);
     } else {

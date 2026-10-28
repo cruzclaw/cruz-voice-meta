@@ -54,6 +54,7 @@ app.whenReady().then(async () => {
   await wait(1500);
   const w = win();
   check(!!w && w.isVisible(), 'the small bar appears when an update is waiting');
+  check(BrowserWindow.getAllWindows().length === 1, 'and it is the only window: no microphone window is opened just to show a strip');
   check(!!w && !w.isFocused(), 'and it does not take focus');
   check(host.describe().mini === true, 'and it is the minimised bar, not the expanded panel');
   const bar = w.getBounds();
@@ -142,6 +143,10 @@ app.whenReady().then(async () => {
   host.press();
   await wait(800);
   check(resolves >= 1, 'pressing Call opens the connection');
+  check(BrowserWindow.getAllWindows().length === 1, 'and a call that could not connect opens no microphone window');
+  host.testSpeaker();
+  await wait(500);
+  check(BrowserWindow.getAllWindows().length === 2, 'the audio window opens only when the speaker or microphone is first needed');
   host.hangUp();
   focusGrabs.length = 0;
 

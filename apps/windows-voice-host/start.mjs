@@ -7,5 +7,5 @@ const electron = createRequire(import.meta.url)('electron');
 const env = { ...process.env };
 delete env.ELECTRON_RUN_AS_NODE;
 
-const child = spawn(electron, ['.'], { stdio: 'inherit', env });
+const child = spawn(electron, ['dist/main.cjs'], { stdio: 'inherit', env });
 child.on('exit', (code) => process.exit(code ?? 0));
