@@ -157,7 +157,47 @@ describe('DeviceSpeech', () => {
     await tick();
     await tick();
     assert.deepEqual(played, []);
-    assert.deepEqual(events, ['tts.start']);
+    assert.deepEqual(events, [], 'no sound was ever made, so Speaking was never shown for it');
+  });
+
+  it('shows Speaking only when there is sound: not while the voice is still making the first chunk', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const order: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() {
+        await gate; // the slow first chunk: loading the voice, or making the first sentence
+        yield new Uint8Array(2);
+      },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    await tick();
+    assert.deepEqual(order, [], 'while it is being made, nothing says Speaking');
+
+    release();
+    await until(() => order.includes('tts.end'));
+    assert.deepEqual(order, ['tts.start', 'play', 'tts.end'], 'Speaking comes with the first sound, and before it plays');
+  });
+
+  it('a reply that made no sound still opens and closes, so the follow-up logic sees an ordinary reply', async () => {
+    const order: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() {
+        // nothing to say aloud
+      },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await until(() => order.includes('tts.end'));
+    assert.deepEqual(order, ['tts.start', 'tts.end']);
   });
 
   it('a reply that follows a cut-off one is spoken even while the old one is still unwinding', async () => {
@@ -517,18 +557,18 @@ describe('speaking on the device, end to end against the demo server', () => {
     h.close();
   });
 
-  it('pressing while it speaks cuts the voice off and listens, with no more audio from the cut-off reply', async () => {
+  it('while the first sound is still being made it says thinking, not speaking, and pressing then cuts the reply off and listens', async () => {
     let open!: () => void;
     const gate = new Promise<void>((r) => (open = r));
     const h = host({ gate });
     await h.open();
     h.controller.command('summon');
     await until(() => h.spoken.length >= 1);
-    assert.equal(h.controller.display, 'speaking');
+    assert.notEqual(h.controller.display, 'speaking', 'nothing is audible yet');
     h.controller.command('summon'); // cut in
     assert.equal(h.controller.display, 'listening');
     assert.ok(h.audio.calls.includes('stopPlayback'));
-    assert.ok(h.sent.some((m) => m.type === 'interrupt'));
+    // The greeting is not a turn the server is still working on, so there is nothing for the server to cancel.
     const playedAtCut = h.audio.played;
     const piecesAtCut = h.spoken.length;
     open();
@@ -537,6 +577,18 @@ describe('speaking on the device, end to end against the demo server', () => {
     assert.equal(h.audio.played, playedAtCut, 'nothing more was played after the cut');
     assert.equal(h.spoken.length, piecesAtCut, 'the rest of the reply was not even made');
     assert.equal(h.controller.display, 'listening');
+    h.close();
+  });
+
+  it('pressing while it is really speaking cuts the voice off and listens', async () => {
+    const h = host();
+    await h.open();
+    h.controller.command('summon');
+    await until(() => h.controller.display === 'speaking');
+    assert.ok(h.audio.played >= 1, 'it says speaking only once sound has been handed to the speaker');
+    h.controller.command('summon'); // cut in
+    assert.equal(h.controller.display, 'listening');
+    assert.ok(h.audio.calls.includes('stopPlayback'));
     h.close();
   });
 

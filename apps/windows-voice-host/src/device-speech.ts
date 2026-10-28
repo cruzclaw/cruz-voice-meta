@@ -37,6 +37,8 @@ export class DeviceSpeech {
   private queue: string[] = [];
   private done = false;
   private started = false;
+  /** tts.start has been sent for this reply: only once sound exists, not when making it begins. */
+  private announced = false;
   /** The cancel generation whose loop is running. A cut-off loop that is still unwinding must not block the next reply. */
   private runningFor: AbortSignal | undefined;
   private abort = new AbortController();
@@ -84,6 +86,7 @@ export class DeviceSpeech {
     this.queue = [];
     this.done = false;
     this.started = false;
+    this.announced = false;
   }
 
   private enqueue(text: string): void {
@@ -91,6 +94,11 @@ export class DeviceSpeech {
     if (!piece || !SPEAKABLE.test(piece)) return;
     this.queue.push(piece);
     void this.run();
+  }
+
+  private announce(turnId: string | undefined): void {
+    this.announced = true;
+    this.options.emit({ v: 1, seq: 0, type: 'tts.start', ttsId: `local-${turnId}`, turnId: turnId ?? 'local', audio: SPEECH_FORMAT });
   }
 
   /** One loop at a time takes pieces off the queue in order. */
@@ -103,12 +111,11 @@ export class DeviceSpeech {
       while (!signal.aborted) {
         const piece = this.queue.shift();
         if (piece === undefined) break;
-        if (!this.started) {
-          this.started = true;
-          this.options.emit({ v: 1, seq: 0, type: 'tts.start', ttsId: `local-${turnId}`, turnId: turnId ?? 'local', audio: SPEECH_FORMAT });
-          if (signal.aborted) return;
-        }
+        this.started = true;
         for await (const chunk of this.options.synthesize(piece, signal)) {
+          if (signal.aborted) return;
+          // "Speaking" starts with the sound, not with the effort of making it, which can take seconds the first time.
+          if (!this.announced) this.announce(turnId);
           if (signal.aborted) return;
           this.options.play(chunk);
         }
@@ -124,7 +131,10 @@ export class DeviceSpeech {
     // Pieces may have arrived while the last one was being made.
     if (this.queue.length > 0) return void this.run();
     if (this.done && this.started) {
+      // A reply that made no sound at all still opens and closes, so the panel and the follow-up logic see an ordinary reply.
+      if (!this.announced) this.announce(turnId);
       this.started = false;
+      this.announced = false;
       this.done = false;
       this.options.emit({ v: 1, seq: 0, type: 'tts.end', ttsId: `local-${turnId}` });
     }
