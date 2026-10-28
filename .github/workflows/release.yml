@@ -1,7 +1,7 @@
 name: release
 
-# Runs only for a version tag. Builds the voice-core, voice-server and
-# tts-kokoro tarballs, records their checksums and an SBOM, attests build
+# Runs only for a version tag. Builds the voice-core, voice-server,
+# tts-kokoro and windows-voice-host tarballs, records their checksums and an SBOM, attests build
 # provenance, and attaches all of it to a GitHub release. The private host pins
 # each tarball by URL and checksum (and overrides voice-core for the other two,
 # which depend on it).
@@ -28,8 +28,8 @@ jobs:
       - run: npm test
       - name: Check the tag matches every package version
         run: |
-          for p in voice-core voice-server tts-kokoro; do
-            v="v$(node -p "require('./packages/$p/package.json').version")"
+          for p in packages/voice-core packages/voice-server packages/tts-kokoro apps/windows-voice-host; do
+            v="v$(node -p "require('./$p/package.json').version")"
             if [ "$GITHUB_REF_NAME" != "$v" ]; then
               echo "Tag $GITHUB_REF_NAME does not match $p version $v" >&2
               exit 1
@@ -38,10 +38,11 @@ jobs:
       - run: npm run build -w @cruzclaw/voice-core
       - run: npm run build -w @cruzclaw/voice-server
       - run: npm run build -w @cruzclaw/tts-kokoro
+      - run: npm run build -w @cruzclaw/windows-voice-host
       - name: Pack, checksum and SBOM
         run: |
           mkdir -p out
-          for p in voice-core voice-server tts-kokoro; do
+          for p in voice-core voice-server tts-kokoro windows-voice-host; do
             npm pack -w @cruzclaw/$p --pack-destination out
           done
           (cd out && sha256sum *.tgz > SHA256SUMS)

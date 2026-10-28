@@ -30,12 +30,13 @@ for (const method of ['show', 'focus', 'moveTop', 'setAlwaysOnTop']) {
 app.whenReady().then(async () => {
   console.log(`display scale factor ${screen.getPrimaryDisplay().scaleFactor}`);
   let resolves = 0;
+  const lines = [];
   const host = createVoiceHost({
     connection: { resolve: async () => { resolves += 1; throw new Error('offline'); } },
     assetsDir: dist,
     deviceSpeech: false,
     shortcutLabel: 'Ctrl+Shift+Space',
-    log: () => undefined,
+    log: (line) => lines.push(line),
   });
   const win = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Cruz');
   const dom = (code) => win().webContents.executeJavaScript(code);
@@ -145,8 +146,9 @@ app.whenReady().then(async () => {
   check(resolves >= 1, 'pressing Call opens the connection');
   check(BrowserWindow.getAllWindows().length === 1, 'and a call that could not connect opens no microphone window');
   host.testSpeaker();
-  await wait(500);
+  await wait(2500);
   check(BrowserWindow.getAllWindows().length === 2, 'the audio window opens only when the speaker or microphone is first needed');
+  check(lines.some((l) => /test tone played/.test(l)), 'and what was sent to it before its page had loaded still arrives: the test tone played');
   host.hangUp();
   focusGrabs.length = 0;
 

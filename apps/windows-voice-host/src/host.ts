@@ -112,6 +112,9 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   const file = (name: string): string => path.join(options.assetsDir, name);
 
   let audioWindow: BrowserWindow | undefined;
+  /** The audio page has registered its listeners. Before that, anything sent to it would be lost. */
+  let audioReady = false;
+  let audioBacklog: Array<[string, unknown[]]> = [];
   let panel: BrowserWindow | undefined;
   let panelLoaded = false;
   let mini = false;
@@ -168,6 +171,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   const needAudio = (): BrowserWindow | undefined => {
     if (disposed) return undefined;
     if (!audioWindow || audioWindow.isDestroyed()) {
+      audioReady = false;
+      audioBacklog = [];
       audioWindow = createAudioWindow();
       if (speech) void speech.warmUp().then((ok) => log(ok ? 'voice is ready' : 'the voice could not be loaded. Replies will show as text only.'));
     }
@@ -176,22 +181,32 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   /** Stopping something that was never started must not start the audio window. */
   const audioIfOpen = (): BrowserWindow | undefined => (audioWindow && !audioWindow.isDestroyed() ? audioWindow : undefined);
 
+  /**
+   * Sends to the audio page. A page that has only just been created has not registered its listeners yet, so
+   * what is sent is held, in order, and delivered the moment the page says it is ready.
+   */
+  const toAudio = (win: BrowserWindow | undefined, channel: string, ...args: unknown[]): void => {
+    if (!win) return;
+    if (!audioReady) audioBacklog.push([channel, args]);
+    else win.webContents.send(channel, ...args);
+  };
+
   const audio: AudioDevice = {
-    startCapture: () => needAudio()?.webContents.send('capture', true),
-    stopCapture: () => audioIfOpen()?.webContents.send('capture', false),
+    startCapture: () => toAudio(needAudio(), 'capture', true),
+    stopCapture: () => toAudio(audioIfOpen(), 'capture', false),
     play: (pcm) => {
       chunksSent++;
       speakerBusy = true;
-      needAudio()?.webContents.send('play', pcm);
+      toAudio(needAudio(), 'play', pcm);
     },
     stopPlayback: () => {
       chunksSent = 0;
       speakerBusy = false;
-      audioIfOpen()?.webContents.send('stop-playback');
+      toAudio(audioIfOpen(), 'stop-playback');
     },
     isPlaying: () => speakerBusy,
-    chime: (kind) => needAudio()?.webContents.send('chime', kind),
-    listenForWake: (on) => (on ? needAudio() : audioIfOpen())?.webContents.send('wake-mic', on),
+    chime: (kind) => toAudio(needAudio(), 'chime', kind),
+    listenForWake: (on) => toAudio(on ? needAudio() : audioIfOpen(), 'wake-mic', on),
   };
 
   const controller = new HostController(
@@ -520,8 +535,14 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     controller.onPlaybackDrained();
   });
   on('audio-ready', (event) => {
-    // The audio window loads after the connection may already be up, so tell it what to do now.
-    if (fromAudio(event) && controller.wakeListening) audioIfOpen()?.webContents.send('wake-mic', true);
+    if (!fromAudio(event) || !audioWindow) return;
+    // The page is ready: deliver, in order, everything that was waiting for it.
+    audioReady = true;
+    const waiting = audioBacklog;
+    audioBacklog = [];
+    for (const [channel, args] of waiting) audioWindow.webContents.send(channel, ...args);
+    // The window loads after the connection may already be up, so tell it what to do now.
+    if (controller.wakeListening && !waiting.some(([channel]) => channel === 'wake-mic')) audioWindow.webContents.send('wake-mic', true);
   });
   on('audio-info', (event, message: unknown) => {
     if (!fromAudio(event)) return;
@@ -614,7 +635,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     get wakeOn() {
       return !!wakeDetector;
     },
-    testSpeaker: () => needAudio()?.webContents.send('beep'),
+    testSpeaker: () => toAudio(needAudio(), 'beep'),
     async selfTest() {
       // Proves the voice path on this machine without a server: the speech process makes a phrase, it goes to the
       // speaker, and the speaker's own level meter hears it.

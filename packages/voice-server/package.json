@@ -1,6 +1,6 @@
 {
   "name": "@cruzclaw/voice-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "The voice session: protocol handling, turn flow, the speech and reasoning ports, and the Meta speech-to-text and Muse Spark adapters. Embed it behind any authenticated WebSocket and any employee host.",

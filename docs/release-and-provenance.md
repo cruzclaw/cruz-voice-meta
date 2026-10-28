@@ -3,9 +3,9 @@
 ## Release flow
 
 1. A reviewed pull request merges to `main` and CI passes.
-2. A maintainer sets the same version in `voice-core`, `voice-server` and `tts-kokoro` and pushes a matching tag, for example `v0.1.0`.
+2. A maintainer sets the same version in `voice-core`, `voice-server`, `tts-kokoro` and `windows-voice-host` and pushes a matching tag, for example `v0.1.0`.
 3. The `release` workflow rebuilds from the tag, runs typecheck and tests, and refuses to publish if the tag does not match every package version.
-4. It attaches five files to the GitHub release: the three package tarballs, `SHA256SUMS` and a CycloneDX SBOM. The tarballs carry a build provenance attestation.
+4. It attaches six files to the GitHub release: the four package tarballs, `SHA256SUMS` and a CycloneDX SBOM. The tarballs carry a build provenance attestation.
 
 ## How a host consumes a release
 

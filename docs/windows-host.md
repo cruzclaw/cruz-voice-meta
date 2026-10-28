@@ -73,3 +73,44 @@ How it works and what it costs:
 - Microphone audio goes to the server only between the first press and the end of listening.
 - Approvals still go through the demo server's HTTP endpoint, not the host.
 - Mute stops automatic listening (follow-ups, the end of the greeting). A deliberate press of Talk, the shortcut or the tray turns the microphone back on. Muting while listening drops what was said so far without an answer.
+
+## Using the host inside another Electron app
+
+`@cruzclaw/windows-voice-host` is also a library. Its main entry is `dist/index.cjs`, and `createVoiceHost` gives an
+Electron main process the whole host: the compact call panel, the hidden audio window, the connection and the
+conversation logic. The app keeps its own tray, shortcut, sign-in and settings.
+
+```js
+const { createVoiceHost } = require('@cruzclaw/windows-voice-host');
+const host = createVoiceHost({
+  connection,                       // { resolve(): Promise<{ url, headers }> }, asked again for every connection
+  assetsDir: dist,                  // the folder holding panel.html, audio.html and the rest
+  speechProcessFile: dist + '/speech-process.cjs',
+  modelCacheDir: userDataFolder,    // where the ~90 MB voice model is kept. Must be writable
+  shortcutLabel: 'Ctrl+Shift+Space',
+  onAttentionOpen: () => showWhatIsWaiting(),
+});
+host.press();                       // connects on the first press, then starts the call
+host.setAttention({ counts: { update: 1, approval: 0, acknowledgement: 0, error: 0 } });
+```
+
+Nothing is opened or loaded until it is needed: no window until something is waiting or a call starts, no microphone
+or speech process until the first call, no connection until the first press (or `start()`).
+
+### The silent attention strip
+
+`setAttention` draws a thin flowing strip of colour at the very top of the window, in the full panel and in the
+minimised bar alike. Green is an update, orange an approval, blue an acknowledgement and red an error. When more than
+one kind is waiting each gets an equal part of the strip: nothing is ranked over anything else, and counts do not
+change the parts. It makes no sound, never speaks, never shows what a message says, never takes focus and never
+expands the panel by itself. With nothing waiting and no panel open, the bar appears silently when something arrives
+and goes away when nothing is waiting. Pressing the strip or the badge calls `onAttentionOpen`. Closing the panel
+while something is waiting leaves the bar, so the strip is never taken away.
+
+The bar and the panel have exactly the same width and left edge (`COMPACT_WIDTH`). `npm run test:electron` checks it on
+a real window at display scales 1, 1.25, 1.5 and 2, along with the colours, the focus rules and the audio window rules.
+The blue of an acknowledgement is not used for any conversation state in the strip, and the colours of the strip are
+kept equal to `ATTENTION_COLORS` by a test.
+
+What counts as an update, an approval, an acknowledgement or an error is up to the app. The host only draws the counts.
+It does not detect meetings, screen sharing or other windows.

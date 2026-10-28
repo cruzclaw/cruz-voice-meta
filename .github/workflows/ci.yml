@@ -23,6 +23,7 @@ jobs:
       - run: npm run build -w @cruzclaw/voice-core
       - run: npm run build -w @cruzclaw/voice-server
       - run: npm run build -w @cruzclaw/tts-kokoro
+      - run: npm run build -w @cruzclaw/windows-voice-host
 
   audit:
     runs-on: ubuntu-latest
