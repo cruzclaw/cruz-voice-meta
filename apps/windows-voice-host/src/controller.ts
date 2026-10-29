@@ -12,6 +12,7 @@ import {
 } from '@cruzclaw/windows-bridge';
 import type { ClientMessage, ServerMessage } from '@cruzclaw/voice-core';
 import { DeviceSpeech, type SpeechSource } from './device-speech.js';
+import { isSignOff } from './signoff.js';
 
 export type ChimeKind = 'listening' | 'thinking' | 'cancelled';
 
@@ -174,11 +175,15 @@ export class HostController {
   }
 
   /**
-   * True while the microphone should be open only to hear the wake phrase: connected, nothing going
-   * on, and not muted. Muting closes the microphone, so nothing is heard at all.
+   * True while the microphone should be open only to hear the wake phrase: connected, not muted, and either nothing going
+   * on or the assistant speaking (so the phrase can cut in). Muting closes the microphone, so nothing is heard at all.
    */
   get wakeListening(): boolean {
-    return !!this.wake && this.state.connected && !this.state.micMuted && this.state.phase === 'idle' && !this.inCall;
+    if (!this.wake || !this.state.connected || this.state.micMuted) return false;
+    // While the assistant is speaking the microphone stays open for the phrase too, so "Hey Cruz" cuts in. The speaker is cancelled out of
+    // the microphone's signal (echo cancellation), and only the phrase is checked: nothing said then is sent anywhere.
+    if (this.state.phase === 'speaking') return !this.discardReply;
+    return this.state.phase === 'idle' && !this.inCall;
   }
 
   /**
@@ -201,7 +206,8 @@ export class HostController {
     if ((message.type === 'transcript.final' || message.type === 'transcript.partial') && this.expectedUtterance && message.utteranceId !== this.expectedUtterance) return;
     this.traceServer(message);
     if (message.type === 'transcript.final' || message.type === 'session.ready') this.discardReply = false;
-    if (message.type === 'transcript.final') this.followUpDue = this.followUp;
+    // A sign-off ("good night") ends the exchange: the answer is still spoken, but nothing listens again by itself.
+    if (message.type === 'transcript.final') this.followUpDue = this.followUp && !isSignOff(message.text);
     if (this.discardReply && REPLY_MESSAGES.includes(message.type)) return;
 
     this.dispatch({ kind: local ? 'local' : 'server', message });

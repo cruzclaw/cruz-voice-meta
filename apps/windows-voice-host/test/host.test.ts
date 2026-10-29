@@ -745,6 +745,53 @@ describe('HostController timing and interrupts', () => {
       t.c.dispose();
     });
 
+    it('keeps the microphone open for the phrase while the assistant speaks, so the phrase cuts in', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'tell me a story' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      assert.equal(t.c.display, 'speaking');
+      assert.equal(t.audio.wakeCalls.at(-1), true, 'open while speaking');
+      t.advance(2000);
+      t.c.onMic(PHRASE);
+      assert.deepEqual(t.phrases, ['HEY CRUZ']);
+      assert.ok(t.sent.some((m) => m.type === 'interrupt'), 'the reply is cut off');
+      assert.equal(t.c.display, 'listening', 'and it listens');
+      t.c.dispose();
+    });
+
+    it('nothing heard while it speaks is sent anywhere: only the phrase is checked', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'tell me a story' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      const fed = t.wake.fed;
+      t.c.onMic(new Uint8Array(960));
+      assert.equal(t.wake.fed, fed + 1, 'checked for the phrase');
+      assert.deepEqual(t.phrases, [], 'and nothing else comes of it');
+      t.c.dispose();
+    });
+
+    it('after a sign-off the answer is spoken but the microphone does not open again by itself', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'Good night.' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      t.server({ type: 'tts.end', ttsId: 't' });
+      assert.equal(t.c.inCall, false, 'the exchange is over');
+      assert.ok(!t.audio.calls.slice(t.audio.calls.lastIndexOf('chime:thinking')).includes('chime:listening'), 'no new listening');
+      t.c.dispose();
+    });
+
     it('one phrase starts one call: a repeat within a moment is ignored', () => {
       const t = woken();
       t.active();
