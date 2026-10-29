@@ -682,8 +682,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
 
   // ---- messages from the two windows ----
 
-  const fromAudio = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => !disposed && !!audioWindow && event.sender === audioWindow.webContents;
-  const fromPanel = (event: Electron.IpcMainEvent): boolean => !disposed && !!panel && event.sender === panel.webContents;
+  // A window that has been destroyed has no webContents to compare with, and asking for it throws. A report that is still on
+  // its way when the window closes (the app quitting, or the page closed) is simply not from a live window.
+  const fromAudio = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => !disposed && !!audioWindow && !audioWindow.isDestroyed() && event.sender === audioWindow.webContents;
+  const fromPanel = (event: Electron.IpcMainEvent): boolean => !disposed && !!panel && !panel.isDestroyed() && event.sender === panel.webContents;
   const listeners: Array<[string, (...args: any[]) => void]> = [];
   const on = (channel: string, listener: (event: Electron.IpcMainEvent, ...args: any[]) => void): void => {
     ipcMain.on(channel, listener);
