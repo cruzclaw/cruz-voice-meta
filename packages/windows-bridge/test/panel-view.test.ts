@@ -11,6 +11,7 @@ import {
   cleanReadiness,
   emptyText,
   micState,
+  stateWords,
 } from '../src/panel-view.js';
 
 const ALL: ReadinessState[] = ['checking', 'ready', 'voice_disabled', 'no_employee', 'no_employees', 'connection_failed', 'signed_out'];
@@ -99,5 +100,24 @@ describe('the employee list', () => {
     assert.deepEqual(cleanReadiness({ state: 'banana' }), { state: 'checking' });
     assert.deepEqual(cleanReadiness(undefined), { state: 'checking' });
     assert.equal(canCall(cleanReadiness({ state: 'READY' })), false);
+  });
+});
+
+describe('the state word while a failure is kept on screen', () => {
+  it('says Try again, not Ready, when the call is idle and an error is still shown', () => {
+    assert.equal(stateWords('idle', 'Ready', true), 'Try again');
+    assert.equal(stateWords('idle', 'Ready', false), 'Ready');
+  });
+
+  it('leaves every other state to say what it is, error or not', () => {
+    for (const display of ['listening', 'thinking', 'speaking', 'task_working', 'awaiting_approval', 'disconnected'] as const) {
+      assert.equal(stateWords(display, 'Whatever', true), 'Whatever');
+      assert.equal(stateWords(display, 'Whatever', false), 'Whatever');
+    }
+  });
+
+  it('puts it in the caption under the orb and on the bar', () => {
+    assert.equal(caption({ state: 'ready' }, 'idle', stateWords('idle', 'Ready', true), 'Tesla'), 'Tesla · Try again');
+    assert.equal(caption({ state: 'ready' }, 'idle', stateWords('idle', 'Ready', false), 'Tesla'), 'Tesla · Ready');
   });
 });
