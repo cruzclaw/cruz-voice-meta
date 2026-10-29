@@ -137,7 +137,8 @@ function reduceServer(s: PanelState, m: ServerMessage): PanelState {
     case 'transcript.partial':
       return { ...s, transcript: m.text };
     case 'transcript.final':
-      return { ...s, transcript: m.text, reply: '', phase: 'thinking', replyDone: false };
+      // Something was heard, so an earlier "did not hear" no longer describes where the call is.
+      return { ...s, transcript: m.text, reply: '', phase: 'thinking', replyDone: false, lastError: undefined };
     case 'assistant.text.delta':
       return { ...s, reply: s.reply + m.text };
     case 'assistant.text.done':
@@ -182,9 +183,10 @@ function reduceServer(s: PanelState, m: ServerMessage): PanelState {
 function reduceUi(s: PanelState, a: UiAction): PanelState {
   switch (a.type) {
     case 'listen_start':
-      return s.micMuted ? s : { ...s, phase: 'listening', transcript: '' };
+      // A new attempt starts clean: the last attempt's "I did not hear anything" is about that attempt, not this one.
+      return s.micMuted ? s : { ...s, phase: 'listening', transcript: '', lastError: undefined };
     case 'listen_end':
-      return s.phase === 'listening' ? { ...s, phase: 'thinking' } : s;
+      return s.phase === 'listening' ? { ...s, phase: 'thinking', lastError: undefined } : s;
     case 'toggle_mute':
       // Muting while listening ends capture locally; nothing is sent to the server.
       return { ...s, micMuted: !s.micMuted, phase: !s.micMuted && s.phase === 'listening' ? 'idle' : s.phase };

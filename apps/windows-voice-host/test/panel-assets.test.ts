@@ -54,6 +54,44 @@ describe('the panel pages', () => {
     assert.equal(/\sstyle\s*=/.test(html), false);
   });
 
+  it('put the speaker test button immediately before the minimise button, and keep it out of the minimised bar', () => {
+    const test = html.indexOf('id="test-audio"');
+    const minimize = html.indexOf('id="minimize"');
+    const close = html.indexOf('id="close"');
+
+    assert.ok(test > html.indexOf('<header>') && test < minimize && minimize < close, 'speaker, then minimise, then close');
+    // Nothing sits between the speaker button and the minimise button.
+    assert.equal(/<button/.test(html.slice(html.indexOf('</button>', test) + 9, html.lastIndexOf('<button', minimize))), false);
+    assert.match(css, /\.head-test\s*\{\s*right:\s*70px/);
+    assert.match(css, /body\.is-mini[^{]*\.audio-test[^{]*\{[^}]*display:\s*none/);
+  });
+
+  it('run the speaker test through the host: it plays, says Testing audio, asks whether it was heard, and starts no call', () => {
+    assert.match(preload, /testAudio: \(\) => ipcRenderer\.send\('panel-test-audio'\)/);
+    assert.match(preload, /audioHeard: \(heard\) => ipcRenderer\.send\('panel-audio-heard', heard === true\)/);
+    assert.match(preload, /onAudioTest: /);
+    assert.ok(html.includes('id="audio-test"') && html.includes('id="audio-heard"') && html.includes('id="audio-not-heard"'));
+    // The page asks and shows; it never plays anything and never touches a call or the microphone.
+    const testJs = js.slice(js.indexOf('const audioTest ='));
+    for (const forbidden of ['new Audio(', 'AudioContext', 'getUserMedia', '.talk(', '.hangup(', '.mute(']) assert.equal(testJs.includes(forbidden), false, forbidden);
+    assert.match(testJs, /window\.panel\.testAudio\(\)/);
+    assert.match(testJs, /window\.panel\.audioHeard\(true\)/);
+    assert.match(testJs, /window\.panel\.audioHeard\(false\)/);
+  });
+
+  it('say the right words at each step of the speaker test, and show an error when playback fails', () => {
+    const host = readFileSync(new URL('../src/host.ts', import.meta.url), 'utf8');
+
+    assert.match(host, /pushAudioTest\('testing', 'Testing audio…'\)/);
+    assert.match(host, /pushAudioTest\('ask', 'Did you hear it\?'\)/);
+    assert.match(host, /pushAudioTest\('error', `The test sound could not be played/);
+    assert.match(host, /pushAudioTest\('busy', 'Cruz is speaking or in a call right now/);
+    // Playing it is the same path as announcements and replies: the voice process, then the audio window.
+    assert.match(host, /const result = await announceNow\(TEST_PHRASE\)/);
+    // It only asks after sound was confirmed, and never claims the person heard it.
+    assert.equal(/pushAudioTest\('yes'[^;]*\);\s*$/m.test(host.slice(0, host.indexOf('function answerAudioTest'))), false);
+  });
+
   it('only look up elements that exist', () => {
     const ids = [...js.matchAll(/\$\('([\w-]+)'\)/g)].map((m) => m[1]!);
     for (const id of new Set(ids)) assert.ok(html.includes(`id="${id}"`), `#${id} is used by panel.js but not in panel.html`);
@@ -67,7 +105,7 @@ describe('the panel pages', () => {
   });
 
   it('stay quiet: no sound, no speech and no focus calls come from the attention code', () => {
-    const attentionJs = js.slice(js.indexOf('const hue'));
+    const attentionJs = js.slice(js.indexOf('const hue'), js.indexOf('// The speaker test.'));
     for (const noisy of ['Audio', 'speechSynthesis', 'Notification', '.focus(', 'play(', 'beep']) assert.equal(attentionJs.includes(noisy), false, noisy);
   });
 

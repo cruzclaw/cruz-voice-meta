@@ -287,16 +287,22 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     stop(): void;
   }
   let announcement: Announcement | undefined;
+  /** Why the last announcement or speaker test could not be played, in the host's own words. Empty when it played. */
+  let announceFailure = '';
   /** How long sound may take to begin once it has been handed to the speaker, and how long a whole announcement may take. */
   const ANNOUNCE_AUDIBLE_MS = 8000;
   const ANNOUNCE_TOTAL_MS = 60000;
 
   function announceNow(text: string): Promise<AnnounceResult> {
     const spoken = typeof text === 'string' ? text.trim().slice(0, 500) : '';
-    if (disposed || !speech || !spoken) return Promise.resolve('failed');
+    if (disposed || !speech || !spoken) {
+      announceFailure = !speech ? 'the voice on this computer is not available' : 'there was nothing to say';
+      return Promise.resolve('failed');
+    }
     // Never over a call, and never over another announcement or anything else the speaker is playing.
     if (announcement || controller.inCall || speakerBusy) return Promise.resolve('busy');
     needAudio();
+    announceFailure = '';
     return new Promise<AnnounceResult>((resolve) => {
       let settled = false;
       let made = false;
@@ -324,6 +330,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
         },
         onFailed: (why) => {
           log(`announcement: playback failed: ${why}`);
+          announceFailure = why;
           cut('failed');
         },
         onDrained: () => {
@@ -348,6 +355,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
               audibleTimer = setTimeout(() => {
                 if (!run.audible) {
                   log('announcement: the speaker did not confirm any sound');
+                  announceFailure = 'the speaker did not confirm any sound';
                   cut('failed');
                 }
               }, ANNOUNCE_AUDIBLE_MS);
@@ -361,10 +369,56 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
         } catch (e) {
           if (abort.signal.aborted) return;
           log(`announcement: the voice failed: ${e instanceof Error ? e.message : 'unknown'}`);
+          announceFailure = e instanceof Error ? e.message.slice(0, 120) : 'the voice failed';
           cut('failed');
         }
       })();
     });
+  }
+
+  // ---- the speaker test ----
+
+  const TEST_PHRASE = 'This is a test of the Cruz speaker. If you can hear this, your speaker works.';
+  let audioTesting = false;
+  const pushAudioTest = (step: string, text = ''): void => void panel?.webContents.send('panel-audio-test', { step, text });
+
+  /**
+   * Plays a short phrase through the same path as Cruz's replies (the voice process, then the audio window), with no call and
+   * no microphone. Playback finishing does not show that anyone heard it, so the person is asked.
+   */
+  async function runAudioTest(): Promise<void> {
+    if (audioTesting) return;
+    audioTesting = true;
+    peakSpeakerLevel = 0;
+    pushAudioTest('testing', 'Testing audio…');
+    log('audio test: started');
+    try {
+      const result = await announceNow(TEST_PHRASE);
+      if (result === 'played') {
+        log(`audio test: played, and the speaker level peaked at ${peakSpeakerLevel.toFixed(3)}`);
+        pushAudioTest('ask', 'Did you hear it?');
+      } else if (result === 'busy') {
+        log('audio test: not run, the speaker is in use');
+        pushAudioTest('busy', 'Cruz is speaking or in a call right now. Try again when it has finished.');
+      } else if (result === 'stopped') {
+        log('audio test: stopped');
+        pushAudioTest('idle');
+      } else {
+        log(`audio test: failed (${announceFailure || 'no reason given'})`);
+        pushAudioTest('error', `The test sound could not be played${announceFailure ? `: ${announceFailure}` : '.'} Check the sound output in Windows.`);
+      }
+    } finally {
+      audioTesting = false;
+    }
+  }
+
+  /** The person says whether they heard it. The answer is the one thing the app cannot know for itself. */
+  function answerAudioTest(heard: boolean): void {
+    const played = peakSpeakerLevel > 0.01;
+    log(`audio test: the person ${heard ? 'heard it' : 'did not hear it'} (speaker level peaked at ${peakSpeakerLevel.toFixed(3)})`);
+    if (heard) pushAudioTest('yes', 'Good: the speaker works. If Cruz is silent in a call, the problem is somewhere else.');
+    else if (played) pushAudioTest('no', 'Cruz played the sound to Windows. Check which output device Windows is using, the volume, and that CruzClaw is not muted in the volume mixer, then test again.');
+    else pushAudioTest('no', 'Cruz could not produce the sound. Close and reopen CruzClaw, then test again.');
   }
 
   const controller = new HostController(
@@ -379,6 +433,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     audio,
     {
       followUp: options.followUp ?? true,
+      onDiagnostic: (line) => log(line),
       onWake: (phrase: string) => {
         log(`wake phrase heard: ${phrase}`);
         announcement?.stop();
@@ -757,6 +812,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (controller.state.phase === 'speaking') panel?.webContents.send('panel-level', level);
   });
   on('panel-talk', (event) => void (fromPanel(event) && pressNow()));
+  on('panel-test-audio', (event) => void (fromPanel(event) && runAudioTest()));
+  on('panel-audio-heard', (event, heard: unknown) => void (fromPanel(event) && answerAudioTest(heard === true)));
   on('panel-hangup', (event) => {
     if (!fromPanel(event)) return;
     pendingPress.clear();

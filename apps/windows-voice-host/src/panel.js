@@ -257,3 +257,27 @@ for (const button of document.querySelectorAll('.js-mute')) button.addEventListe
 $('minimize').addEventListener('click', () => window.panel.minimize());
 $('expand').addEventListener('click', () => window.panel.expand());
 $('close').addEventListener('click', () => window.panel.hide());
+
+// The speaker test. The host does the playing and says which step it is on; this page only shows it and sends back what the
+// person answers. It starts no call and never touches the microphone.
+const audioTest = $('audio-test');
+const audioTestText = $('audio-test-text');
+const audioAsk = $('audio-test-ask');
+const audioClose = $('audio-test-close');
+window.panel.onAudioTest((step) => {
+  const known = step && typeof step === 'object' ? step : {};
+  const name = typeof known.step === 'string' ? known.step : '';
+  audioTest.hidden = name === '' || name === 'idle';
+  audioTest.dataset.step = name;
+  audioTestText.textContent = typeof known.text === 'string' ? known.text.slice(0, 240) : '';
+  audioAsk.hidden = name !== 'ask';
+  audioClose.hidden = !(name === 'yes' || name === 'no' || name === 'error' || name === 'busy');
+  $('test-audio').disabled = name === 'testing' || name === 'ask';
+});
+$('test-audio').addEventListener('click', () => window.panel.testAudio());
+$('audio-heard').addEventListener('click', () => window.panel.audioHeard(true));
+$('audio-not-heard').addEventListener('click', () => window.panel.audioHeard(false));
+audioClose.addEventListener('click', () => {
+  audioTest.hidden = true;
+  $('test-audio').disabled = false;
+});
