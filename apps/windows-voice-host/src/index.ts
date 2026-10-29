@@ -9,7 +9,7 @@
  * the package's dist folder. See docs/windows-host.md.
  */
 export { createVoiceHost, STATE_TEXT } from './host.js';
-export type { VoiceHost, VoiceHostOptions } from './host.js';
+export type { AnnounceResult, VoiceHost, VoiceHostOptions } from './host.js';
 export { HostController } from './controller.js';
 export type { AudioDevice, ControllerOptions, Link, WakeSource } from './controller.js';
 export { VoiceClient } from './client.js';
