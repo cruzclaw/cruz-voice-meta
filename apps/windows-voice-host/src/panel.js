@@ -78,6 +78,10 @@ const CAPTION = {
 let inCall = false;
 let lastState;
 
+const hue = $('hue');
+let attentionKinds = [];
+let attentionLabel = '';
+let thinking = false;
 window.panel.onState((s) => {
   lastState = s;
   // Signed out: nothing of the earlier conversation stays in the page.
@@ -94,6 +98,8 @@ window.panel.onState((s) => {
   orb.dataset.muted = String(muted);
   miniDot.dataset.state = s.display;
   miniDot.dataset.muted = String(muted);
+  thinking = s.display === 'thinking' || s.display === 'task_working';
+  showHue();
   // What it says, who it is for, whether a call can start and what the microphone is doing all come from the main
   // process, already decided. This page only shows them.
   const caption = s.caption || CAPTION[s.display] || s.label;
@@ -204,21 +210,31 @@ window.panel.onDiag((text) => {
 
 // The silent attention strip, the words under it and the badge on the minimised bar. They show
 // exactly what the main process sends and do nothing until the person presses one of them.
-const hue = $('hue');
 const chip = $('attention');
 const miniAttn = $('mini-attn');
+// What the strip shows: the waiting items' colours flowing as one gradient, or, while the employee is thinking, an orange glow.
+function showHue() {
+  hue.hidden = attentionKinds.length === 0 && !thinking;
+  hue.classList.toggle('is-thinking', thinking);
+  hue.setAttribute('aria-label', thinking ? 'Thinking' : attentionLabel);
+  // Each kind of waiting item adds its colour. The first colour closes the loop so the flow has no seam; one kind alone
+  // shades from darker to lighter and back, so it still moves.
+  const colour = (kind) => `var(--attn-${kind})`;
+  const stops = attentionKinds.length > 1
+    ? [...attentionKinds.map(colour), colour(attentionKinds[0])]
+    : attentionKinds.length === 1
+      ? [`color-mix(in srgb, ${colour(attentionKinds[0])} 70%, #000)`, colour(attentionKinds[0]), `color-mix(in srgb, ${colour(attentionKinds[0])} 55%, #fff)`, colour(attentionKinds[0]), `color-mix(in srgb, ${colour(attentionKinds[0])} 70%, #000)`]
+      : [];
+  if (stops.length) hue.style.setProperty('--stops', stops.join(', '));
+}
 window.panel.onAttention((a) => {
   const segments = Array.isArray(a && a.segments) ? a.segments : [];
   const label = (a && a.label) || '';
-  hue.hidden = segments.length === 0;
-  hue.setAttribute('aria-label', label);
-  hue.textContent = '';
+  attentionKinds = segments.map((segment) => segment.kind);
+  attentionLabel = label;
+  showHue();
   $('attention-dots').textContent = '';
   for (const segment of segments) {
-    const seg = document.createElement('span');
-    seg.className = `seg seg-${segment.kind}`;
-    seg.style.flexGrow = String(segment.share);
-    hue.append(seg);
     const dot = document.createElement('span');
     dot.className = `dot dot-${segment.kind}`;
     $('attention-dots').append(dot);

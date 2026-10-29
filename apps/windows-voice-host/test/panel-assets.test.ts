@@ -14,9 +14,23 @@ describe('the panel pages', () => {
     for (const kind of ATTENTION_KINDS) {
       const declared = new RegExp(`--attn-${kind}:\\s*(#[0-9a-fA-F]{6})`).exec(css)?.[1];
       assert.equal(declared?.toLowerCase(), ATTENTION_COLORS[kind].toLowerCase(), kind);
-      assert.match(css, new RegExp(`\\.seg-${kind}\\s*\\{[^}]*var\\(--attn-${kind}\\)`), `strip colour for ${kind}`);
       assert.match(css, new RegExp(`\\.dot-${kind}\\s*\\{[^}]*var\\(--attn-${kind}\\)`), `dot colour for ${kind}`);
     }
+  });
+
+  it('colour the strip as one flowing gradient from the waiting kinds, right to left, not as separate blocks', () => {
+    assert.match(js, /var\(--attn-\$\{kind\}\)/);
+    assert.match(js, /colour\(attentionKinds\[0\]\)\]/, 'the first colour closes the loop');
+    assert.match(css, /\.hue\s*\{[^}]*background:\s*linear-gradient\(90deg in oklch,\s*var\(--stops\)\)/);
+    assert.match(css, /@keyframes hue-flow\s*\{\s*to\s*\{\s*background-position:\s*200% 0/);
+    assert.equal(/\.seg/.test(css) || /createElement\('span'\);\s*seg\./.test(js), false, 'no separate blocks');
+  });
+
+  it('show an orange glow from the centre outwards, bright to dark, for as long as the employee is thinking', () => {
+    assert.match(css, /\.hue\.is-thinking\s*\{[^}]*radial-gradient\(ellipse farthest-side at 50% 50%,\s*#ffd699 0%,\s*#ff9a1f var\(--glow\),\s*#8a3a00 100%\)/);
+    assert.match(css, /@keyframes hue-breathe/);
+    assert.match(js, /thinking = s\.display === 'thinking' \|\| s\.display === 'task_working'/);
+    assert.match(js, /hue\.hidden = attentionKinds\.length === 0 && !thinking/);
   });
 
   it('keep the attention colours out of the conversation colours, so blue only ever means an acknowledgement in the strip', () => {
@@ -62,8 +76,9 @@ describe('the panel pages', () => {
     assert.equal(/id="hue"[^>]*aria-live/.test(html), false);
   });
 
-  it('stop the flowing motion for people who ask for less motion', () => {
-    assert.match(css, /prefers-reduced-motion[\s\S]*\.seg\s*\{\s*animation:\s*none/);
+  it('slow the flowing motion, not stop it, for people who ask for less motion', () => {
+    assert.match(css, /prefers-reduced-motion[\s\S]*\.hue\s*\{\s*animation-duration:\s*16s/);
+    assert.equal(/prefers-reduced-motion[\s\S]*\.hue[^{]*\{[^}]*animation:\s*none/.test(css), false, 'the strip is slowed, never stopped, so a long wait always shows life');
   });
 
   it('let the person choose the employee from the panel itself, and hand only an id to the app', () => {
@@ -90,7 +105,7 @@ describe('the panel pages', () => {
   });
 
   it('keep the strip crisp on the small bar, and keep the content of the bar out from under it', () => {
-    assert.match(css, /body\.is-mini \.seg\s*\{[^}]*box-shadow:\s*none/);
+    assert.match(css, /body\.is-mini \.hue\s*\{[^}]*box-shadow:\s*none/);
     assert.match(css, /\.mini\s*\{[^}]*padding:\s*4px /, 'the bar starts below the 4px strip');
     assert.match(css, /\.hue\s*\{[^}]*height:\s*4px/);
   });
