@@ -181,6 +181,8 @@ All entries below were reconstructed on **29 October 2026** from repository hist
 - [ ] **Complete deployment verification**: backend revision and edge bindings pass; the global script still flags unchanged services on older revisions.
 - [ ] **Installed live acceptance**: microphone/audio/visual timing, read/pass, mailbox, exact approval, once-only send and dashboard regression remain open. No outbound message was sent during the identity probe.
 
+- [x] **Installed wake-model packaging repair (29 October)**: the consuming Windows app now rejects packages missing required model assets and reports detector startup failures. Reviewer passed 113 app tests and confirmed installed assets and packaged/installed app hashes match. Implementer reports synthesized-speaker wake recognition before and after restart. Real-person wake and microphone-to-answer acceptance remain open.
+
 ### Release register
 
 The links are authoritative for publication timestamps and assets; the dated sections above describe source work, not necessarily publication time.
