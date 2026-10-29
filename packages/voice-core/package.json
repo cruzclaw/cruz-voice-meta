@@ -1,6 +1,6 @@
 {
   "name": "@cruzclaw/voice-core",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "description": "Versioned VoiceEmployeeHost contract, DTOs and conformance suite.",
@@ -9,7 +9,11 @@
   "module": "./dist/esm/index.js",
   "types": "./dist/types/index.d.ts",
   "typesVersions": {
-    "*": { "conformance": ["dist/types/conformance-entry.d.ts"] }
+    "*": {
+      "conformance": [
+        "dist/types/conformance-entry.d.ts"
+      ]
+    }
   },
   "exports": {
     ".": {
@@ -23,7 +27,9 @@
       "require": "./dist/cjs/conformance-entry.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs"
   }
