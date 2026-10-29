@@ -292,7 +292,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
   const ANNOUNCE_TOTAL_MS = 60000;
 
   function announceNow(text: string): Promise<AnnounceResult> {
-    const spoken = typeof text === 'string' ? text.trim().slice(0, 300) : '';
+    const spoken = typeof text === 'string' ? text.trim().slice(0, 500) : '';
     if (disposed || !speech || !spoken) return Promise.resolve('failed');
     // Never over a call, and never over another announcement or anything else the speaker is playing.
     if (announcement || controller.inCall || speakerBusy) return Promise.resolve('busy');
