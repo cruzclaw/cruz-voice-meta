@@ -4,7 +4,7 @@ Voice modules for talking to a virtual employee, with a standalone synthetic dem
 
 **Status updated: 29 October 2026 (Asia/Kolkata).** [v0.2.2](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.2) is published and verified. The Windows integration has been installed and exercised with earlier packages. The new real-employee gateway integration, updated plugin rollout and installed v0.2.2 live acceptance are **not complete**. A published package is not evidence that a production app uses it.
 
-This README records the agreed product plan and its delivery history. Historical completions entered here on 29 October are explicitly labelled **Retrospective**. A checked item means only the named milestone is complete, not that every acceptance criterion for its workstream passed.
+This README records the agreed product plan and its delivery history. A checked item means only the named milestone is complete, not that every acceptance criterion for its workstream passed.
 
 ## Intended experience
 
@@ -135,13 +135,13 @@ The pre-existing employee platform and unrelated source-monitoring work are depe
 
 All entries below were reconstructed on **29 October 2026** from repository history, release evidence and implementation reports. Dates group work by the project day in Asia/Kolkata; report-based host milestones are labelled. They are not backdated claims of contemporaneous review. A completion is limited to the wording of its line.
 
-### 26 October 2026 — Retrospective
+### 26 October 2026
 
 - [x] **Repository created** with independent public history ([initial commit](https://github.com/cruzclaw/cruz-voice-meta/commit/c60880a)).
 - [x] **Initial host contract, synthetic mock and conformance scaffold** committed ([9344e75](https://github.com/cruzclaw/cruz-voice-meta/commit/9344e75)).
 - [x] **Project plan recorded** covering Windows voice, existing-employee integration, governance, verification and separately scoped extensions. Planning completion does not imply implementation.
 
-### 27 October 2026 — Retrospective
+### 27 October 2026
 
 - [x] **Protocol v1 and demo session server** implemented: validators, ordering and audio boundaries ([cd38f6c](https://github.com/cruzclaw/cruz-voice-meta/commit/cd38f6c), [e4362ff](https://github.com/cruzclaw/cruz-voice-meta/commit/e4362ff)).
 - [x] **Meta transcription and Muse Spark adapters** implemented ([c1f1808](https://github.com/cruzclaw/cruz-voice-meta/commit/c1f1808), [f044622](https://github.com/cruzclaw/cruz-voice-meta/commit/f044622)).
@@ -151,7 +151,7 @@ All entries below were reconstructed on **29 October 2026** from repository hist
 - [x] **Device-side speech protocol** implemented; server speech provider optional ([c67b484](https://github.com/cruzclaw/cruz-voice-meta/commit/c67b484)).
 - [x] **CI/release foundation, Apache-2.0, packaged licence, scoped audit exceptions and timeout repair** completed in the v0.1.0 source candidate ([a65490b](https://github.com/cruzclaw/cruz-voice-meta/commit/a65490b)). Publication is separately recorded in the release register.
 
-### 28 October 2026 — Retrospective
+### 28 October 2026
 
 - [x] **Embeddable Windows host and silent attention strip** implemented ([34293ca](https://github.com/cruzclaw/cruz-voice-meta/commit/34293ca)); colours, equal segments and geometry checked locally.
 - [x] **Lazy first-call connection/audio/model loading** implemented ([3715503](https://github.com/cruzclaw/cruz-voice-meta/commit/3715503), [922cf44](https://github.com/cruzclaw/cruz-voice-meta/commit/922cf44)).
@@ -161,7 +161,7 @@ All entries below were reconstructed on **29 October 2026** from repository hist
 - [x] **Earlier backend gateway deployed and invalid-ticket edge responses checked** — host deployment evidence; this does not certify the later real-employee bridge.
 - [x] **Startup pad, explicit employee selection, persistent name caption and compact strip clearance** implemented ([8f8a053](https://github.com/cruzclaw/cruz-voice-meta/commit/8f8a053), [f9f246e](https://github.com/cruzclaw/cruz-voice-meta/commit/f9f246e), [1f124d4](https://github.com/cruzclaw/cruz-voice-meta/commit/1f124d4)); [PR #2](https://github.com/cruzclaw/cruz-voice-meta/pull/2) merged.
 
-### 29 October 2026 — Retrospective
+### 29 October 2026
 
 - [x] **Renderer playback confirmation and honest playback failure** completed, replacing early/fabricated “Speaking” transitions ([890ac77](https://github.com/cruzclaw/cruz-voice-meta/commit/890ac77)). Audio-clock progress confirms playback scheduling, not that a person heard the speaker.
 - [x] **Speech-end/chunk/playback timing instrumentation** added ([5bb1bec](https://github.com/cruzclaw/cruz-voice-meta/commit/5bb1bec), [6e73e11](https://github.com/cruzclaw/cruz-voice-meta/commit/6e73e11)).
@@ -171,7 +171,7 @@ All entries below were reconstructed on **29 October 2026** from repository hist
 - [ ] **Install and accept the v0.2.2 integrated app with the real employee gateway** — still pending.
 - [ ] **Certify live identity/context, read/pass, exact approval/once-only send and real latency** — still pending.
 
-### Release register — Retrospective
+### Release register
 
 The links are authoritative for publication timestamps and assets; the dated sections above describe source work, not necessarily publication time.
 
@@ -203,7 +203,7 @@ Session resume/replay, partial transcripts, full cost accounting and real-provid
 For each completed milestone:
 
 - Update its roadmap row and append the actual date, evidence link, exact commit/release and verification level to this ledger.
-- Label later backfilled entries **Retrospective**, recording when the backfill was made. Preserve prior failures and distinguish fixes from rollout.
+- For historical entries, record both the completion date and the date the entry was added. Preserve prior failures and distinguish fixes from rollout.
 - Keep local, released, installed, deployed and live-accepted statuses separate; do not check a whole workstream because a subtask passed.
 - Update the matching Linear issue without duplicating the task. Push reviewed documentation with the completed work; do not retag releases for documentation.
 - Keep private credentials, customer content, infrastructure details and proprietary source out of public evidence.
