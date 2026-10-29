@@ -1,6 +1,6 @@
 {
   "name": "@cruzclaw/tts-kokoro",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Local text-to-speech with Kokoro-82M. Isolated in its own package because its dependency tree carries unfixed image-library advisories that speech never reaches.",
   "license": "Apache-2.0",
@@ -15,7 +15,9 @@
       "require": "./dist/cjs/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "node scripts/build.mjs"
   },
