@@ -94,6 +94,7 @@ export class HostController {
   private readonly now: () => number;
   private readonly followUp: boolean;
   private wake: WakeSource | undefined;
+  private readonly onSpeechError: ((error: unknown) => void) | undefined;
   private readonly onWake: ((phrase: string) => void) | undefined;
   private wakeMicOn = false;
   private wakeCooldownUntil = 0;
@@ -133,12 +134,18 @@ export class HostController {
     this.followUp = options.followUp ?? true;
     this.wake = options.wake;
     this.onWake = options.onWake;
+    this.onSpeechError = options.onSpeechError;
     if (options.speak) {
       this.deviceSpeech = new DeviceSpeech({
         synthesize: options.speak,
         // What the device says is reported like what a server says, so the state machine has one path.
         emit: (message) => this.onServer(message, true),
-        play: (pcm) => this.onSpeech(pcm),
+        // The device voice plays as it is made. It is cut off at its source (DeviceSpeech.cancel), so it needs no state gate.
+        play: (pcm) => {
+          if (!this.discardReply) this.audio.play(pcm);
+        },
+        isPlaying: () => this.audio.isPlaying(),
+        onPlaybackFailed: (reason) => this.playbackFailed(reason),
         ...(options.onSpeechError ? { onError: options.onSpeechError } : {}),
       });
     }
@@ -213,8 +220,31 @@ export class HostController {
     this.emit();
   }
 
+  /** The audio window confirms sound has begun, by its own audio clock: this is when Speaking is true. */
+  onPlaybackStarted(): void {
+    this.deviceSpeech?.onAudible();
+  }
+
+  /** The audio window says it could not play what it was given. Nothing is shown as speaking. */
+  onPlaybackFailed(reason: string): void {
+    this.deviceSpeech?.onFailed(reason);
+  }
+
+  /** Nothing was heard. What was scheduled is stopped, nothing says Speaking, and the person is told. The text stays on screen. */
+  private playbackFailed(reason: string): void {
+    this.silence();
+    this.listenWhenDrained = false;
+    this.followUpDue = false;
+    this.nextListenQuiet = false;
+    this.greeting = false;
+    this.onSpeechError?.(new Error(`playback failed: ${reason}`));
+    this.dispatch({ kind: 'ui', action: { type: 'playback_failed', message: 'The reply could not be played on this computer, so it is shown as text. Check the speaker and try again.' } });
+    this.emit();
+  }
+
   /** The speaker has finished everything it was given. */
   onPlaybackDrained(): void {
+    this.deviceSpeech?.onQuiet();
     if (!this.listenWhenDrained) return;
     this.listenWhenDrained = false;
     this.command('summon');

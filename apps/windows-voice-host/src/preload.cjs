@@ -12,6 +12,8 @@ contextBridge.exposeInMainWorld('hostAudio', {
   sendMic: (buffer) => ipcRenderer.send('mic', buffer),
   sendOutLevel: (level) => ipcRenderer.send('out-level', level),
   drained: (count) => ipcRenderer.send('playback-drained', count),
+  started: (stops) => ipcRenderer.send('playback-started', stops),
+  failed: (stops, reason) => ipcRenderer.send('playback-failed', stops, String(reason)),
   sendLevel: (level) => ipcRenderer.send('level', level),
   info: (message) => ipcRenderer.send('audio-info', String(message)),
   reportError: (message) => ipcRenderer.send('audio-error', String(message)),

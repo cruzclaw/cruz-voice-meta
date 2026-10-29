@@ -48,6 +48,8 @@ function deviceSpeech(opts: Parameters<typeof fakeSynth>[1] = {}) {
     emit: (m) => events.push(m.type),
     play: (pcm) => played.push(pcm[0]!),
     onError: (e) => errors.push(e),
+    // The audio window's report is the test's to make, so Speaking is only said when a test says sound began.
+    audibleTimeoutMs: 60_000,
   });
   speech.reset(true);
   return { speech, spoken, events, played, errors };
@@ -64,6 +66,8 @@ describe('DeviceSpeech', () => {
     assert.equal(t.spoken[0], 'The status is good.');
     await until(() => t.played.length === 1);
     await tick();
+    assert.equal(t.events.length, 0, 'handed to the speaker is not yet heard');
+    t.speech.onAudible();
     assert.deepEqual(t.events, ['tts.start']);
     assert.equal(t.events.includes('tts.end'), false, 'the first sentence is out, but the reply is not finished');
 
@@ -157,7 +161,236 @@ describe('DeviceSpeech', () => {
     await tick();
     await tick();
     assert.deepEqual(played, []);
-    assert.deepEqual(events, ['tts.start']);
+    assert.deepEqual(events, [], 'no sound was ever made, so Speaking was never shown for it');
+  });
+
+  it('shows Speaking only when the speaker says sound has begun: not while the first chunk is made, and not when it is only handed over', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const order: string[] = [];
+    let speakerBusy = true;
+    const speech = new DeviceSpeech({
+      async *synthesize() {
+        await gate; // the slow first chunk: loading the voice, or making the first sentence
+        yield new Uint8Array(2);
+      },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => speakerBusy,
+      quietTimeoutMs: 60_000,
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    await tick();
+    assert.equal(order.length, 0, 'while it is being made, nothing says Speaking');
+
+    release();
+    await until(() => order.includes('play'));
+    await tick();
+    assert.deepEqual(order, ['play'], 'handed to the speaker, but nothing is audible yet');
+
+    speech.onAudible();
+    assert.deepEqual(order, ['play', 'tts.start'], 'Speaking comes when the speaker says sound began');
+    speakerBusy = false;
+    speech.onQuiet();
+    assert.deepEqual(order, ['play', 'tts.start', 'tts.end']);
+  });
+
+  it('never says Speaking when the speaker does not confirm sound: playback has failed, and that is said', async () => {
+    const order: string[] = [];
+    const failures: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 40,
+      isPlaying: () => true,
+      quietTimeoutMs: 60_000,
+      onPlaybackFailed: (reason) => failures.push(reason),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    assert.deepEqual(order, ['play']);
+    await until(() => failures.length === 1, 1000);
+    await tick();
+
+    assert.deepEqual(order, ['play'], 'no Speaking, and no end of a reply that was never heard');
+    assert.match(failures[0]!, /did not confirm any sound/);
+  });
+
+  it('says playback failed at once when the audio window says it cannot play, and never says Speaking', async () => {
+    const order: string[] = [];
+    const failures: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => true,
+      quietTimeoutMs: 60_000,
+      onPlaybackFailed: (reason) => failures.push(reason),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    speech.onFailed('the audio output is suspended');
+
+    assert.deepEqual(failures, ['the audio output is suspended']);
+    assert.deepEqual(order, ['play']);
+    speech.onAudible(); // a late confirmation after the failure changes nothing
+    speech.onQuiet();
+    assert.deepEqual(order, ['play']);
+  });
+
+  it('drops the rest of a reply whose playback failed, and speaks the next reply normally', async () => {
+    const order: string[] = [];
+    const failures: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => true,
+      quietTimeoutMs: 60_000,
+      onPlaybackFailed: (reason) => failures.push(reason),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'First sentence. Second sentence. '));
+    await tick();
+    const handedOver = order.filter((x) => x === 'play').length;
+    speech.onFailed('the audio output is suspended');
+    speech.onMessage(delta('t1', 'Third sentence. '));
+    speech.onMessage(done('t1'));
+    await tick();
+    assert.equal(order.filter((x) => x === 'play').length, handedOver, 'what is still streaming in for the failed reply is not spoken');
+
+    speech.onMessage(delta('t2', 'A new reply. '));
+    speech.onMessage(done('t2'));
+    await tick();
+    assert.equal(order.filter((x) => x === 'play').length, handedOver + 1, 'the next reply is tried again');
+    speech.onAudible();
+    assert.ok(order.includes('tts.start'));
+  });
+
+  it('ignores a failure report when sound already began, or when nothing is waiting', async () => {
+    const failures: string[] = [];
+    const t = deviceSpeech();
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => t.events.push(m.type),
+      play: () => undefined,
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => true,
+      quietTimeoutMs: 60_000,
+      onPlaybackFailed: (reason) => failures.push(reason),
+    });
+
+    speech.reset(true);
+    speech.onFailed('nothing is waiting');
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    speech.onAudible();
+    speech.onFailed('too late: sound already began');
+
+    assert.deepEqual(failures, []);
+    assert.deepEqual(t.events, ['tts.start']);
+  });
+
+  it('ends the reply only when the speaker is quiet, not when the last sentence has been made', async () => {
+    const order: string[] = [];
+    let playing = true;
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => playing,
+      quietTimeoutMs: 60_000,
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    speech.onAudible();
+    await tick();
+    assert.deepEqual(order, ['play', 'tts.start'], 'everything is made, but the speaker is still playing it');
+
+    playing = false;
+    speech.onQuiet();
+    assert.deepEqual(order, ['play', 'tts.start', 'tts.end']);
+  });
+
+  it('opens before it closes even when the speaker goes quiet before it ever reported sound', async () => {
+    const order: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() { yield new Uint8Array(2); },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+      audibleTimeoutMs: 60_000,
+      isPlaying: () => true,
+      quietTimeoutMs: 60_000,
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hi.'));
+    speech.onMessage(done('t1'));
+    await tick();
+    speech.onQuiet(); // a very short sound that was over before its start was reported
+
+    assert.deepEqual(order, ['play', 'tts.start', 'tts.end']);
+  });
+
+  it('ignores a report of sound or quiet that belongs to nothing: no reply waiting, or one that was cut off', async () => {
+    const t = deviceSpeech();
+
+    t.speech.onAudible();
+    t.speech.onQuiet();
+    assert.equal(t.events.length, 0);
+
+    t.speech.onMessage(delta('t1', 'Hello there. And more'));
+    await until(() => t.played.length === 1);
+    t.speech.cancel(); // cut off before sound was reported
+    t.speech.onAudible();
+    t.speech.onQuiet();
+    await tick();
+
+    assert.equal(t.events.length, 0, 'neither Speaking nor an end for a reply that was cut off');
+  });
+
+  it('a report of sound for the cut-off reply never marks the next reply as started', async () => {
+    const t = deviceSpeech();
+
+    t.speech.onMessage(delta('t1', 'First reply. More'));
+    await until(() => t.played.length === 1);
+    t.speech.cancel();
+    t.speech.onMessage(delta('t2', 'Second reply. More'));
+    await until(() => t.played.length === 2);
+    assert.equal(t.events.length, 0);
+
+    t.speech.onAudible(); // this one is for the second reply, whose sound is awaited
+    assert.deepEqual(t.events, ['tts.start']);
+  });
+
+  it('a reply that made no sound closes without ever having said Speaking, so the follow-up logic still sees it end', async () => {
+    const order: string[] = [];
+    const speech = new DeviceSpeech({
+      async *synthesize() {
+        // nothing to say aloud
+      },
+      emit: (m) => order.push(m.type),
+      play: () => order.push('play'),
+    });
+    speech.reset(true);
+    speech.onMessage(delta('t1', 'Hello there.'));
+    speech.onMessage(done('t1'));
+    await until(() => order.includes('tts.end'));
+    assert.deepEqual(order, ['tts.end']);
   });
 
   it('a reply that follows a cut-off one is spoken even while the old one is still unwinding', async () => {
@@ -194,7 +427,7 @@ describe('DeviceSpeech', () => {
     t.speech.onMessage(done('t1'));
     await until(() => t.events.includes('tts.end'));
     assert.equal(t.errors.length, 1);
-    assert.deepEqual(t.events, ['tts.start', 'tts.end']);
+    assert.deepEqual(t.events, ['tts.end'], 'nothing was heard, so it never said Speaking');
   });
 });
 
@@ -411,16 +644,30 @@ class FakeAudio implements AudioDevice {
   played = 0;
   busy = false;
   onDrained: (() => void) | undefined;
+  /** Like the audio window: sound begins a moment after the first chunk is handed over, unless playback was stopped. */
+  onStarted: (() => void) | undefined;
+  /** When set, the audio window cannot play: it reports a failure instead of sound beginning. */
+  failWith: string | undefined;
+  onFailed: ((reason: string) => void) | undefined;
+  private stops = 0;
   private timer: ReturnType<typeof setTimeout> | undefined;
   startCapture() { this.calls.push('start'); }
   stopCapture() { this.calls.push('stop'); }
   play(pcm: Uint8Array) {
     this.played += pcm.byteLength;
+    if (!this.busy) {
+      const mine = this.stops;
+      setTimeout(() => {
+        if (this.stops !== mine) return;
+        if (this.failWith) this.onFailed?.(this.failWith);
+        else this.onStarted?.();
+      }, 15);
+    }
     this.busy = true;
     clearTimeout(this.timer);
     this.timer = setTimeout(() => { this.busy = false; this.onDrained?.(); }, 60);
   }
-  stopPlayback() { this.calls.push('stopPlayback'); this.busy = false; clearTimeout(this.timer); }
+  stopPlayback() { this.calls.push('stopPlayback'); this.stops++; this.busy = false; clearTimeout(this.timer); }
   isPlaying() { return this.busy; }
   chime(kind: ChimeKind) { this.calls.push(`chime:${kind}`); }
   listenForWake() { /* not used here */ }
@@ -474,6 +721,8 @@ describe('speaking on the device, end to end against the demo server', () => {
       ...(opts.speak === false ? {} : { speak: fakeSynth(spoken, { ...(opts.gate ? { gate: opts.gate } : {}), chunks: 4 }) }),
     });
     audio.onDrained = () => controller.onPlaybackDrained();
+    audio.onStarted = () => controller.onPlaybackStarted();
+    audio.onFailed = (reason) => controller.onPlaybackFailed(reason);
     return { audio, seen, sent, startModes, spoken, serverAudio, controller, open: async () => { await client.openConnection(); controller.setConnected(true); }, close: () => { controller.dispose(); client.close(); } };
   }
   const talk = (c: HostController) => {
@@ -517,18 +766,18 @@ describe('speaking on the device, end to end against the demo server', () => {
     h.close();
   });
 
-  it('pressing while it speaks cuts the voice off and listens, with no more audio from the cut-off reply', async () => {
+  it('while the first sound is still being made it says thinking, not speaking, and pressing then cuts the reply off and listens', async () => {
     let open!: () => void;
     const gate = new Promise<void>((r) => (open = r));
     const h = host({ gate });
     await h.open();
     h.controller.command('summon');
     await until(() => h.spoken.length >= 1);
-    assert.equal(h.controller.display, 'speaking');
+    assert.notEqual(h.controller.display, 'speaking', 'nothing is audible yet');
     h.controller.command('summon'); // cut in
     assert.equal(h.controller.display, 'listening');
     assert.ok(h.audio.calls.includes('stopPlayback'));
-    assert.ok(h.sent.some((m) => m.type === 'interrupt'));
+    // The greeting is not a turn the server is still working on, so there is nothing for the server to cancel.
     const playedAtCut = h.audio.played;
     const piecesAtCut = h.spoken.length;
     open();
@@ -537,6 +786,38 @@ describe('speaking on the device, end to end against the demo server', () => {
     assert.equal(h.audio.played, playedAtCut, 'nothing more was played after the cut');
     assert.equal(h.spoken.length, piecesAtCut, 'the rest of the reply was not even made');
     assert.equal(h.controller.display, 'listening');
+    h.close();
+  });
+
+  it('when the audio window cannot play, the person is told, nothing ever says Speaking, and nothing listens by itself afterwards', async () => {
+    const h = host();
+    const seen = new Set<string>();
+
+    h.audio.failWith = 'the audio output is suspended';
+    await h.open();
+    const watch = setInterval(() => seen.add(h.controller.display), 2);
+
+    h.controller.command('summon');
+    await until(() => h.controller.state.lastError?.code === 'PLAYBACK', 8000);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    clearInterval(watch);
+
+    assert.equal(seen.has('speaking'), false, 'never shown as speaking');
+    assert.match(h.controller.state.lastError!.message, /could not be played on this computer/);
+    assert.notEqual(h.controller.display, 'listening', 'it does not open the microphone as if the reply had been heard');
+    assert.ok(h.audio.calls.includes('stopPlayback'), 'what was scheduled is stopped, so nothing sounds late');
+    h.close();
+  });
+
+  it('pressing while it is really speaking cuts the voice off and listens', async () => {
+    const h = host();
+    await h.open();
+    h.controller.command('summon');
+    await until(() => h.controller.display === 'speaking');
+    assert.ok(h.audio.played >= 1, 'it says speaking only once sound has been handed to the speaker');
+    h.controller.command('summon'); // cut in
+    assert.equal(h.controller.display, 'listening');
+    assert.ok(h.audio.calls.includes('stopPlayback'));
     h.close();
   });
 
@@ -587,6 +868,8 @@ describe('speaking on the device, end to end against the demo server', () => {
       { speak: fakeSynth([], { fail: () => true }), onSpeechError: (e) => errors.push(e) },
     );
     audio.onDrained = () => controller.onPlaybackDrained();
+    audio.onStarted = () => controller.onPlaybackStarted();
+    audio.onFailed = (reason) => controller.onPlaybackFailed(reason);
     await client.openConnection();
     controller.setConnected(true);
     controller.command('summon');

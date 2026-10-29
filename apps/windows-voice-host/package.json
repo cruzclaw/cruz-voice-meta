@@ -1,6 +1,6 @@
 {
   "name": "@cruzclaw/windows-voice-host",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Windows voice host for Electron: the compact call panel with a silent attention strip, microphone and speaker, on-device speech and the voice protocol. Use createVoiceHost from another app, or run it standalone.",
   "license": "Apache-2.0",
   "type": "module",

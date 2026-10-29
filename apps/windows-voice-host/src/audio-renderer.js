@@ -123,6 +123,8 @@ let playedSamples = 0;
 let peak = 0;
 // Chunks started since playback last stopped. The main process compares it with how many it sent.
 let chunkCount = 0;
+// How many times playback was stopped. Reports carry it, so one from before a stop is never taken for a later reply.
+let stops = 0;
 
 function play(pcm) {
   if (context.state !== 'running') void context.resume();
@@ -139,10 +141,13 @@ function play(pcm) {
   node.buffer = buffer;
   node.connect(speaker);
   // Chain chunks back to back, with a small lead so the first one is not clipped.
+  const first = playing.size === 0;
   playAt = Math.max(playAt, context.currentTime + 0.05);
-  node.start(playAt);
+  const startsAt = playAt;
+  node.start(startsAt);
   playAt += buffer.duration;
   playing.add(node);
+  if (first) reportWhenAudible(startsAt);
   if (playedSamples === 0) window.hostAudio.info(`speaker: first chunk, audio ${context.state} at ${context.sampleRate} Hz`);
   playedSamples += samples.length;
   chunkCount++;
@@ -152,7 +157,30 @@ function play(pcm) {
   };
 }
 
+// Playback has really begun only when the AUDIO clock has passed the first chunk's start time, plus what the output
+// device adds. A wall-clock timer would say so even with a stopped or suspended output; the audio clock only moves while
+// the device is consuming audio. If it has not moved far enough within AUDIBLE_DEADLINE_MS, playback has failed, and
+// that is said, with the reason. A stop in between cancels the report either way.
+const AUDIBLE_DEADLINE_MS = 2000;
+function reportWhenAudible(startsAt) {
+  const mine = stops;
+  const since = performance.now();
+  const timer = setInterval(() => {
+    if (stops !== mine) return clearInterval(timer);
+    if (context.state !== 'running') void context.resume();
+    const due = startsAt + (context.outputLatency || 0);
+    if (context.state === 'running' && context.currentTime >= due) {
+      clearInterval(timer);
+      window.hostAudio.started(stops);
+    } else if (performance.now() - since > AUDIBLE_DEADLINE_MS) {
+      clearInterval(timer);
+      window.hostAudio.failed(stops, context.state === 'running' ? 'the audio clock did not advance' : `the audio output is ${context.state}`);
+    }
+  }, 10);
+}
+
 function stopPlayback() {
+  stops++;
   for (const node of playing) {
     node.onended = null;
     try {
