@@ -28,7 +28,11 @@ A thin Alexa-style top indicator is present in **both expanded and compact state
 | Blue | Acknowledgement |
 | Red | Error requiring attention |
 
-When several kinds are waiting, they have equal segments; counts do not determine segment widths or priority. The compact strip is crisp, with no colour spill onto its controls; the expanded panel retains its glow. Both states share a **342 logical-pixel width and left edge**. The compact bar is **36 logical pixels high**, with content below its **4-pixel strip**. Geometry has been checked at 100%, 125%, 150% and 200% display scaling.
+When several kinds are waiting, their colours flow into one another as a single gradient; each kind present adds its colour once, so counts do not change the gradient and no kind is ranked above another.
+
+**While the employee is thinking, the strip is an orange glow that replaces the attention colours.** The waiting colours are not discarded: they return as soon as thinking stops, and the badge and the chip still show what is waiting. A long wait is shown in preference to an item that is already counted. When Windows is set to show less motion, the strip does not move: the waiting colours are a still gradient and thinking is a still orange glow.
+
+The compact strip is crisp, with no colour spill onto its controls; the expanded panel retains its glow. Both states share a **342 logical-pixel width and left edge**. The compact bar is **36 logical pixels high**, with content below its **4-pixel strip**. Geometry has been checked at 100%, 125%, 150% and 200% display scaling.
 
 Pop-ups are off by default. The app does not detect meetings, screen sharing or user activity to make this decision.
 

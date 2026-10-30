@@ -63,6 +63,15 @@ export function emptyText(r: Readiness, shortcut: string): string {
   }
 }
 
+/**
+ * The state word under the orb. After a failed turn the call is idle and can be tried again, but "Ready" beside a failure that is
+ * still on screen reads as if nothing went wrong. While an error is kept, the word says what can be done: "Try again". It is only
+ * for idle: every other state (listening, thinking, speaking) says what it is.
+ */
+export function stateWords(display: DisplayState, text: string, hasError: boolean): string {
+  return hasError && display === 'idle' ? 'Try again' : text;
+}
+
 /** The short words on the bar, and under the orb in the full panel. */
 export function caption(r: Readiness, display: DisplayState, stateText: string, employeeName: string | undefined): string {
   const who = employeeName ? `${employeeName} · ` : '';

@@ -101,8 +101,17 @@ or speech process until the first call, no connection until the first press (or 
 
 `setAttention` draws a thin flowing strip of colour at the very top of the window, in the full panel and in the
 minimised bar alike. Green is an update, orange an approval, blue an acknowledgement and red an error. When more than
-one kind is waiting each gets an equal part of the strip: nothing is ranked over anything else, and counts do not
-change the parts. It makes no sound, never speaks, never shows what a message says, never takes focus and never
+one kind is waiting their colours flow into one another as ONE gradient (each kind present adds its colour once):
+nothing is ranked over anything else, and counts do not change the gradient. With a single kind the strip shades from
+darker to lighter and back, so it still moves.
+
+While the employee is thinking (or a task is working) the strip is an orange glow that breathes from the middle
+outwards, and it **replaces** the attention colours for as long as thinking lasts. The waiting colours are kept, not
+cleared: when thinking stops they are back, and the badge and chip keep saying what is waiting. With nothing waiting,
+thinking still shows the glow. A long wait is shown in preference to an item that is already counted.
+
+When Windows is set to show less motion (`prefers-reduced-motion`) nothing in the strip moves: the waiting colours are a
+still gradient and thinking is a still orange glow. It is never hidden for that reason. The strip makes no sound, never speaks, never shows what a message says, never takes focus and never
 expands the panel by itself. With nothing waiting and no panel open, the bar appears silently when something arrives
 and goes away when nothing is waiting. Pressing the strip or the badge calls `onAttentionOpen`. Closing the panel
 while something is waiting leaves the bar, so the strip is never taken away.

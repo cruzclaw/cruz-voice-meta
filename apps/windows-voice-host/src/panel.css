@@ -33,25 +33,32 @@ body {
   position: relative;
 }
 
-/* ---- Silent attention: a thin, flowing strip of colour at the very top, in every size ---- */
+/* ---- Silent attention: a thin strip at the very top, in every size ----
+   Waiting items colour it as ONE gradient that keeps flowing right to left. Each kind of item that is waiting adds its colour
+   to the gradient, so several kinds shift into one another instead of sitting as separate blocks. While the employee is
+   thinking, the strip is an orange glow that breathes from the centre outwards, so a long wait is never a still screen. */
+@property --glow { syntax: '<percentage>'; inherits: false; initial-value: 12%; }
 .hue {
+  --stops: var(--attn-update), var(--attn-update);
   position: absolute; top: 0; left: 0; right: 0; height: 4px; z-index: 10;
-  display: flex; pointer-events: none;
+  pointer-events: none;
+  background: linear-gradient(90deg in oklch, var(--stops));
+  background-size: 200% 100%;
+  animation: hue-flow 4.2s linear infinite;
 }
 .hue[hidden] { display: none; }
-.seg {
-  --c: #999;
-  flex: 1 1 0; min-width: 0; height: 100%;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--c) 78%, #000), var(--c), color-mix(in srgb, var(--c) 62%, #fff), var(--c), color-mix(in srgb, var(--c) 78%, #000));
-  background-size: 200% 100%;
-  box-shadow: 0 2px 9px 1px color-mix(in srgb, var(--c) 70%, transparent);
-  animation: hue-flow 3.4s linear infinite;
+/* The same strip, thinking: bright orange in the middle, dark orange at both ends, the bright part breathing outwards.
+   While the employee is thinking this takes the strip over: the waiting colours (still held in --stops) are not shown until it
+   stops, and then they come back. A long wait is more important to see than a waiting item that is already counted. */
+.hue.is-thinking {
+  background: radial-gradient(ellipse farthest-side at 50% 50%, #ffd699 0%, #ff9a1f var(--glow), #8a3a00 100%);
+  background-size: 100% 100%;
+  box-shadow: 0 2px 12px 2px rgba(255, 138, 20, 0.55);
+  animation: hue-breathe 1.8s ease-in-out infinite alternate;
 }
-.seg-update { --c: var(--attn-update); }
-.seg-approval { --c: var(--attn-approval); }
-.seg-acknowledgement { --c: var(--attn-acknowledgement); }
-.seg-error { --c: var(--attn-error); }
-@keyframes hue-flow { to { background-position: -200% 0; } }
+/* The gradient repeats every two widths of the strip, so moving it by exactly one period loops without a jump. */
+@keyframes hue-flow { to { background-position: 200% 0; } }
+@keyframes hue-breathe { from { --glow: 10%; } to { --glow: 78%; } }
 
 /* What is waiting, in words, for the person who wants to look. It never moves or speaks by itself. */
 .attn-chip {
@@ -83,6 +90,7 @@ button { -webkit-app-region: no-drag; font: inherit; color: inherit; cursor: poi
 button:focus-visible { outline: 2px solid #4f6bed; outline-offset: 2px; }
 .head-close { right: 6px; }
 .head-min { right: 38px; }
+.head-test { right: 70px; }
 .head-btn { position: absolute; top: 4px; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: var(--muted); }
 .head-btn:hover { background: #f1f3f6; color: var(--fg); }
 .head-btn svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2; fill: none; stroke-linecap: round; }
@@ -194,10 +202,24 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 .call[data-listening="true"] .call-rings { animation: ripple 1.6s ease-out infinite; }
 .call svg { width: 22px; height: 22px; }
 
+/* The speaker test line, under the header. It is a status line, never a pop-up. */
+/* Over the top of the panel, so showing it moves nothing and cuts off nothing below. */
+.audio-test { position: absolute; top: 38px; left: 10px; right: 10px; z-index: 6; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 10px; background: #f4f6fa; box-shadow: 0 2px 8px rgba(29, 35, 48, 0.12); font-size: 12px; }
+.audio-test[hidden] { display: none; }
+.audio-test-text { flex: 1; min-width: 0; }
+.audio-test[data-step="error"] { background: #fdecec; color: var(--danger); }
+.audio-test[data-step="no"] { background: #fff6e5; color: var(--warn); }
+.audio-test-ask[hidden], #audio-test-close[hidden] { display: none; }
+.audio-test-btn { padding: 3px 10px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--fg); font: inherit; cursor: pointer; }
+.audio-test-btn:hover { background: #f1f3f6; }
 .diag { margin: 0; padding: 0 12px 6px; font-size: 10px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 @media (prefers-reduced-motion: reduce) {
-  .orb .core, .orb .swirl, .ring, .call-rings, .seg { animation: none !important; }
+  .orb .core, .orb .swirl, .ring, .call-rings { animation: none !important; }
+  /* Windows is set to show less motion, so the strip does not move. Nothing is lost: what is waiting is still its colour, as a
+     still gradient, and thinking is still the orange glow, held at its middle brightness. The chip and dots say the same in words. */
+  .hue { animation: none; }
+  .hue.is-thinking { animation: none; --glow: 45%; }
   .scroll { scroll-behavior: auto; }
 }
 
@@ -205,9 +227,9 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 /* The top 4px belong to the attention strip, so the bar's own content starts below it and never overlaps it. */
 .mini { display: none; align-items: center; gap: 6px; height: 100%; padding: 4px 6px 0 10px; }
 /* Small bar: the strip stays crisp, with no glow spilling onto the buttons and words under it. */
-body.is-mini .seg { box-shadow: none; }
+body.is-mini .hue { box-shadow: none; }
 body.is-mini { border-radius: 8px; }
-body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag, body.is-mini .attn-chip { display: none; }
+body.is-mini header, body.is-mini main, body.is-mini footer, body.is-mini .diag, body.is-mini .attn-chip, body.is-mini .audio-test { display: none; }
 body.is-mini .mini { display: flex; }
 .mini[hidden] { display: none; }
 .mini-drag { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 100%; -webkit-app-region: drag; }

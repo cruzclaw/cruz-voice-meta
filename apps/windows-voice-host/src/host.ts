@@ -18,6 +18,7 @@ import {
   expandedBounds,
   hueSegments,
   micState,
+  stateWords,
   miniBounds,
   noAttention,
   normalizeAttention,
@@ -31,6 +32,7 @@ import {
   type Readiness,
   type VoiceEmployee,
 } from '@cruzclaw/windows-bridge';
+import { createAnnouncer, type AnnounceResult } from './announcer.js';
 import { VoiceClient } from './client.js';
 import { ConnectionError, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
@@ -93,6 +95,8 @@ export interface VoiceHostOptions {
   onEmployeeChoose?: (id: string) => void;
 }
 
+export type { AnnounceResult } from './announcer.js';
+
 export interface VoiceHost {
   readonly controller: HostController;
   /** Opens a connection (retrying) now. Without this, the first press opens it. */
@@ -130,6 +134,16 @@ export interface VoiceHost {
   disableWake(): void;
   readonly wakeOn: boolean;
   testSpeaker(): void;
+  /**
+   * Says these words aloud on this device, once, without a call and without opening the microphone. Resolves 'played'
+   * when sound was heard and finished, 'stopped' when stopAnnouncement (or the person starting a call) cut it off,
+   * 'failed' when nothing could be played, and 'busy', saying nothing, when a call or another announcement is using the
+   * speaker. It never speaks over a call.
+   */
+  announce(text: string): Promise<AnnounceResult>;
+  /** Stops an announcement at once. Does nothing when none is playing. */
+  stopAnnouncement(): void;
+  readonly announcing: boolean;
   /** Makes the voice say a test phrase on this machine and reports whether the speaker's level meter heard it. */
   selfTest(): Promise<{ ok: boolean; reason?: string; seconds?: number; firstAudioMs?: number; peakLevel?: number }>;
   /** The state of the panel as the person sees it, for tests and diagnostics. */
@@ -264,6 +278,65 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     listenForWake: (on) => toAudio(on ? needAudio() : audioIfOpen(), 'wake-mic', on),
   };
 
+  // ---- announcements: words said on the speaker with no call (see announcer.ts) ----
+
+  const announcer = createAnnouncer({
+    speech,
+    isDisposed: () => disposed,
+    inCall: () => controller.inCall,
+    speakerBusy: () => speakerBusy,
+    prepare: () => void needAudio(),
+    play: (pcm) => audio.play(pcm),
+    stopPlayback: () => audio.stopPlayback(),
+    log: (line) => log(line),
+  });
+  const announceNow = announcer.announce;
+
+  // ---- the speaker test ----
+
+  const TEST_PHRASE = 'This is a test of the Cruz speaker. If you can hear this, your speaker works.';
+  let audioTesting = false;
+  const pushAudioTest = (step: string, text = ''): void => void panel?.webContents.send('panel-audio-test', { step, text });
+
+  /**
+   * Plays a short phrase through the same path as Cruz's replies (the voice process, then the audio window), with no call and
+   * no microphone. Playback finishing does not show that anyone heard it, so the person is asked.
+   */
+  async function runAudioTest(): Promise<void> {
+    if (audioTesting) return;
+    audioTesting = true;
+    peakSpeakerLevel = 0;
+    pushAudioTest('testing', 'Testing audio…');
+    log('audio test: started');
+    try {
+      const result = await announceNow(TEST_PHRASE);
+      if (result === 'played') {
+        log(`audio test: played, and the speaker level peaked at ${peakSpeakerLevel.toFixed(3)}`);
+        pushAudioTest('ask', 'Did you hear it?');
+      } else if (result === 'busy') {
+        log('audio test: not run, the speaker is in use');
+        pushAudioTest('busy', 'Cruz is speaking or in a call right now. Try again when it has finished.');
+      } else if (result === 'stopped') {
+        log('audio test: stopped');
+        pushAudioTest('idle');
+      } else {
+        log(`audio test: failed (${announcer.failure() || 'no reason given'})`);
+        pushAudioTest('error', `The test sound could not be played${announcer.failure() ? `: ${announcer.failure()}` : '.'} Check the sound output in Windows.`);
+      }
+    } finally {
+      audioTesting = false;
+    }
+  }
+
+  /** The person says whether they heard it. The answer is the one thing the app cannot know for itself. */
+  function answerAudioTest(heard: boolean): void {
+    const played = peakSpeakerLevel > 0.01;
+    log(`audio test: the person ${heard ? 'heard it' : 'did not hear it'} (speaker level peaked at ${peakSpeakerLevel.toFixed(3)})`);
+    if (heard) pushAudioTest('yes', 'Good: the speaker works. If Cruz is silent in a call, the problem is somewhere else.');
+    else if (played) pushAudioTest('no', 'Cruz played the sound to Windows. Check which output device Windows is using, the volume, and that CruzClaw is not muted in the volume mixer, then test again.');
+    else pushAudioTest('no', 'Cruz could not produce the sound. Close and reopen CruzClaw, then test again.');
+  }
+
   const controller = new HostController(
     {
       send: (message) => {
@@ -276,8 +349,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     audio,
     {
       followUp: options.followUp ?? true,
+      onDiagnostic: (line) => log(line),
       onWake: (phrase: string) => {
         log(`wake phrase heard: ${phrase}`);
+        announcer.stop();
         options.onWake?.(phrase);
         if (!panel || !panel.isVisible()) showPanelSilently();
       },
@@ -327,11 +402,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       employee: chosen?.name,
       employees,
       selectedEmployeeId: chosen?.id,
-      caption: captionFor(readiness, display, STATE_TEXT[display], chosen?.name),
+      caption: captionFor(readiness, display, stateWords(display, STATE_TEXT[display], !!state.lastError), chosen?.name),
       emptyText: emptyText(readiness, shortcutLabel),
       mic,
       micText: MIC_TEXT[mic],
-      label: STATE_TEXT[display],
+      label: stateWords(display, STATE_TEXT[display], !!state.lastError),
       connected: state.connected,
       transcript: state.transcript,
       reply: state.reply,
@@ -578,8 +653,10 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
 
   // ---- messages from the two windows ----
 
-  const fromAudio = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => !disposed && !!audioWindow && event.sender === audioWindow.webContents;
-  const fromPanel = (event: Electron.IpcMainEvent): boolean => !disposed && !!panel && event.sender === panel.webContents;
+  // A window that has been destroyed has no webContents to compare with, and asking for it throws. A report that is still on
+  // its way when the window closes (the app quitting, or the page closed) is simply not from a live window.
+  const fromAudio = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean => !disposed && !!audioWindow && !audioWindow.isDestroyed() && event.sender === audioWindow.webContents;
+  const fromPanel = (event: Electron.IpcMainEvent): boolean => !disposed && !!panel && !panel.isDestroyed() && event.sender === panel.webContents;
   const listeners: Array<[string, (...args: any[]) => void]> = [];
   const on = (channel: string, listener: (event: Electron.IpcMainEvent, ...args: any[]) => void): void => {
     ipcMain.on(channel, listener);
@@ -601,6 +678,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     // Only the report that covers every chunk sent so far means the speaker is quiet.
     if (!fromAudio(event) || count !== chunksSent) return;
     speakerBusy = false;
+    announcer.onDrained();
     controller.onPlaybackDrained();
   });
   on('playback-failed', (event, stops: unknown, reason: unknown) => {
@@ -608,6 +686,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (!fromAudio(event) || stops !== stopsSent) return;
     const why = typeof reason === 'string' ? reason.slice(0, 120) : 'unknown';
     log(`speaker: playback failed: ${why}`);
+    announcer.onFailed(why);
     controller.onPlaybackFailed(why);
   });
   on('playback-started', (event, stops: unknown) => {
@@ -618,6 +697,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     // The one number that matters to the person: from the end of what they said to the first sound they hear.
     if (inputEndedAt) log(`latency: first sound ${now - inputEndedAt} ms after the end of speech`);
     inputEndedAt = 0;
+    announcer.onStarted();
     controller.onPlaybackStarted();
   });
   on('audio-ready', (event) => {
@@ -648,6 +728,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (controller.state.phase === 'speaking') panel?.webContents.send('panel-level', level);
   });
   on('panel-talk', (event) => void (fromPanel(event) && pressNow()));
+  on('panel-test-audio', (event) => void (fromPanel(event) && runAudioTest()));
+  on('panel-audio-heard', (event, heard: unknown) => void (fromPanel(event) && answerAudioTest(heard === true)));
   on('panel-hangup', (event) => {
     if (!fromPanel(event)) return;
     pendingPress.clear();
@@ -688,6 +770,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
    * the panel opens and says why.
    */
   function pressNow(): void {
+    // Starting a call ends what is being announced: the person is here and wants the call.
+    announcer.stop();
     if (!canCall(effectiveReadiness())) {
       log(`call not started: ${effectiveReadiness().state}`);
       return;
@@ -717,6 +801,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       controller.hangUp();
     },
     endSession: (reason = 'signed_out') => {
+      announcer.stop();
       pendingPress.clear();
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
@@ -783,6 +868,11 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     get wakeOn() {
       return !!wakeDetector;
     },
+    announce: announceNow,
+    stopAnnouncement: () => announcer.stop(),
+    get announcing() {
+      return announcer.active;
+    },
     testSpeaker: () => toAudio(needAudio(), 'beep'),
     async selfTest() {
       // Proves the voice path on this machine without a server: the speech process makes a phrase, it goes to the
@@ -807,6 +897,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     },
     describe: () => ({ visible: !!panel && panel.isVisible(), mini, bounds: panel?.getBounds(), attention }),
     dispose() {
+      announcer.stop();
       disposed = true;
       clearTimeout(reconnectTimer);
       controller.dispose();

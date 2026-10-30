@@ -41,6 +41,8 @@ export class EndpointDetector {
   private quietMs = 0;
   private started = false;
   private done = false;
+  private peak = 0;
+  private frames = 0;
 
   constructor(options: EndpointOptions = {}) {
     this.o = { ...DEFAULTS, ...options };
@@ -54,6 +56,16 @@ export class EndpointDetector {
     this.quietMs = 0;
     this.started = false;
     this.done = false;
+    this.peak = 0;
+    this.frames = 0;
+  }
+
+  /**
+   * What the microphone has done since listening began, for the log: how long, how loud at most, the room floor it learned, the
+   * level that counted as speech, how much speech there was. Numbers only.
+   */
+  get stats(): { listenedMs: number; frames: number; peak: number; floor: number; threshold: number; speechMs: number; speechStarted: boolean } {
+    return { listenedMs: this.elapsedMs, frames: this.frames, peak: this.peak, floor: this.floor ?? 0, threshold: this.threshold, speechMs: this.speechMs, speechStarted: this.started };
   }
 
   /** The level above which a frame counts as speech right now. */
@@ -65,6 +77,8 @@ export class EndpointDetector {
     if (this.done || !Number.isFinite(level)) return undefined;
     const { frameMs } = this.o;
     this.elapsedMs += frameMs;
+    this.frames += 1;
+    if (level > this.peak) this.peak = level;
     const loud = level > this.threshold;
 
     if (this.floor === undefined) this.floor = Math.min(level, MAX_FLOOR);

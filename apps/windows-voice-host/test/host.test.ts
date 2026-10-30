@@ -745,6 +745,53 @@ describe('HostController timing and interrupts', () => {
       t.c.dispose();
     });
 
+    it('keeps the microphone open for the phrase while the assistant speaks, so the phrase cuts in', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'tell me a story' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      assert.equal(t.c.display, 'speaking');
+      assert.equal(t.audio.wakeCalls.at(-1), true, 'open while speaking');
+      t.advance(2000);
+      t.c.onMic(PHRASE);
+      assert.deepEqual(t.phrases, ['HEY CRUZ']);
+      assert.ok(t.sent.some((m) => m.type === 'interrupt'), 'the reply is cut off');
+      assert.equal(t.c.display, 'listening', 'and it listens');
+      t.c.dispose();
+    });
+
+    it('nothing heard while it speaks is sent anywhere: only the phrase is checked', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'tell me a story' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      const fed = t.wake.fed;
+      t.c.onMic(new Uint8Array(960));
+      assert.equal(t.wake.fed, fed + 1, 'checked for the phrase');
+      assert.deepEqual(t.phrases, [], 'and nothing else comes of it');
+      t.c.dispose();
+    });
+
+    it('after a sign-off the answer is spoken but the microphone does not open again by itself', () => {
+      const t = woken();
+      t.active();
+      t.c.press();
+      t.c.command('summon'); // the person finished speaking
+      t.server({ type: 'transcript.final', utteranceId: 'host-1', text: 'Good night.' });
+      t.server({ type: 'tts.start', ttsId: 't', turnId: 'turn-1', audio: t.fmt });
+      t.c.onSpeech(new Uint8Array(960));
+      t.server({ type: 'tts.end', ttsId: 't' });
+      assert.equal(t.c.inCall, false, 'the exchange is over');
+      assert.ok(!t.audio.calls.slice(t.audio.calls.lastIndexOf('chime:thinking')).includes('chime:listening'), 'no new listening');
+      t.c.dispose();
+    });
+
     it('one phrase starts one call: a repeat within a moment is ignored', () => {
       const t = woken();
       t.active();
@@ -899,6 +946,69 @@ describe('HostController timing and interrupts', () => {
     for (let i = 0; i < 210; i++) t.c.onLevel(0.003);
     assert.equal(t.c.state.lastError?.code, 'NO_SPEECH');
     assert.deepEqual(t.sent.map((m) => m.type), ['input.end']);
+    t.c.dispose();
+  });
+
+  it('an earlier "did not hear anything" does not stay on screen over the next attempt, or over a turn that was heard', () => {
+    const t = scripted({ endpoint: new EndpointDetector() });
+
+    t.active();
+    t.c.command('summon');
+    for (let i = 0; i < 210; i++) t.c.onLevel(0.003);
+    assert.equal(t.c.state.lastError?.code, 'NO_SPEECH');
+    assert.equal(t.c.display, 'idle');
+
+    // The next attempt starts clean: it is listening, and the old error is not shown beside it.
+    t.c.command('summon');
+    assert.equal(t.c.display, 'listening');
+    assert.equal(t.c.state.lastError, undefined);
+
+    // Heard, then thinking: no error from before while the answer is awaited.
+    for (let i = 0; i < 30; i++) t.c.onLevel(0.08);
+    for (let i = 0; i < 25; i++) t.c.onLevel(0.003);
+    assert.equal(t.c.display, 'thinking');
+    assert.equal(t.c.state.lastError, undefined);
+    t.c.dispose();
+  });
+
+  it('keeps an error that belongs to the turn it came from, until something new begins', () => {
+    const t = scripted({ endpoint: new EndpointDetector() });
+
+    t.active();
+    t.c.command('summon');
+    for (let i = 0; i < 30; i++) t.c.onLevel(0.08);
+    for (let i = 0; i < 25; i++) t.c.onLevel(0.003);
+    t.server({ type: 'error', code: 'PROVIDER_ERROR', message: 'x', retryable: true });
+
+    assert.equal(t.c.display, 'idle');
+    assert.equal(t.c.state.lastError?.code, 'PROVIDER_ERROR');
+  });
+
+  it('writes the timeline of a call to the log as numbers and times, never words', () => {
+    const lines: string[] = [];
+    const t = scripted({ endpoint: new EndpointDetector(), onDiagnostic: (line) => lines.push(line) });
+
+    t.active();
+    t.c.command('summon');
+    for (let i = 0; i < 210; i++) t.c.onLevel(0.003);
+    t.c.command('summon');
+    for (let i = 0; i < 30; i++) t.c.onLevel(0.08);
+    for (let i = 0; i < 25; i++) t.c.onLevel(0.003);
+    t.server({ type: 'transcript.final', utteranceId: 'host-2', text: 'my secret words' });
+    t.server({ type: 'assistant.text.delta', turnId: 't', text: 'a private reply' });
+    t.server({ type: 'assistant.text.done', turnId: 't', text: 'a private reply' });
+
+    const log = lines.join('\n');
+
+    assert.match(log, /listen: opened \(asked for, wake microphone was not open/);
+    assert.match(log, /listen: no speech in 8000 ms \(loudest 0\.003, room 0\.003, speech above 0\.012, 200 frames\)/);
+    assert.match(log, /listen: speech began \d+ ms in \(loudest 0\.080/);
+    assert.match(log, /listen: speech ended after \d+ ms \(spoke \d+ ms/);
+    assert.match(log, /listen: closed after \d+ ms/);
+    assert.match(log, /turn: heard you, \d+ ms after the question was sent/);
+    assert.match(log, /turn: the reply began, \d+ ms after/);
+    assert.match(log, /turn: the reply was complete/);
+    assert.doesNotMatch(log, /secret|private/);
     t.c.dispose();
   });
 

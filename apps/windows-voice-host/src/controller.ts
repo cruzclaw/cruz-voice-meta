@@ -12,6 +12,7 @@ import {
 } from '@cruzclaw/windows-bridge';
 import type { ClientMessage, ServerMessage } from '@cruzclaw/voice-core';
 import { DeviceSpeech, type SpeechSource } from './device-speech.js';
+import { isSignOff } from './signoff.js';
 
 export type ChimeKind = 'listening' | 'thinking' | 'cancelled';
 
@@ -62,6 +63,11 @@ export interface ControllerOptions {
   speak?: SpeechSource['synthesize'];
   /** Speaking on this device failed. The reply is still shown as text. */
   onSpeechError?: (error: unknown) => void;
+  /**
+   * A line about the timeline of a call: when listening opened and closed and how loud the microphone was, when the answer began
+   * and ended. Times and numbers only, never what was said. For the log, so a call that went wrong can be read afterwards.
+   */
+  onDiagnostic?: (line: string) => void;
   /** A press after this long without activity starts a new session, with a new greeting. */
   idleGreetMs?: number;
   now?: () => number;
@@ -120,6 +126,13 @@ export class HostController {
   /** After an interrupt, replies from the cut-off turn are ignored until the next utterance is recognised. */
   private discardReply = false;
   private readonly deviceSpeech: DeviceSpeech | undefined;
+  private readonly diagnostic: (line: string) => void;
+  /** The timeline of the turn in progress, for the log. */
+  private listenOpenedAt = 0;
+  private inputEndedAt = 0;
+  private firstTextAt = 0;
+  private micFrames = 0;
+  private micPeak = 0;
 
   constructor(
     private readonly link: Link,
@@ -132,6 +145,7 @@ export class HostController {
     this.idleGreetMs = options.idleGreetMs ?? IDLE_GREET_MS;
     this.now = options.now ?? Date.now;
     this.followUp = options.followUp ?? true;
+    this.diagnostic = options.onDiagnostic ?? (() => undefined);
     this.wake = options.wake;
     this.onWake = options.onWake;
     this.onSpeechError = options.onSpeechError;
@@ -161,11 +175,15 @@ export class HostController {
   }
 
   /**
-   * True while the microphone should be open only to hear the wake phrase: connected, nothing going
-   * on, and not muted. Muting closes the microphone, so nothing is heard at all.
+   * True while the microphone should be open only to hear the wake phrase: connected, not muted, and either nothing going
+   * on or the assistant speaking (so the phrase can cut in). Muting closes the microphone, so nothing is heard at all.
    */
   get wakeListening(): boolean {
-    return !!this.wake && this.state.connected && !this.state.micMuted && this.state.phase === 'idle' && !this.inCall;
+    if (!this.wake || !this.state.connected || this.state.micMuted) return false;
+    // While the assistant is speaking the microphone stays open for the phrase too, so "Hey Cruz" cuts in. The speaker is cancelled out of
+    // the microphone's signal (echo cancellation), and only the phrase is checked: nothing said then is sent anywhere.
+    if (this.state.phase === 'speaking') return !this.discardReply;
+    return this.state.phase === 'idle' && !this.inCall;
   }
 
   /**
@@ -186,8 +204,10 @@ export class HostController {
     this.lastActivity = this.now();
     // A recognised utterance that is not the latest one belongs to a turn the person already left.
     if ((message.type === 'transcript.final' || message.type === 'transcript.partial') && this.expectedUtterance && message.utteranceId !== this.expectedUtterance) return;
+    this.traceServer(message);
     if (message.type === 'transcript.final' || message.type === 'session.ready') this.discardReply = false;
-    if (message.type === 'transcript.final') this.followUpDue = this.followUp;
+    // A sign-off ("good night") ends the exchange: the answer is still spoken, but nothing listens again by itself.
+    if (message.type === 'transcript.final') this.followUpDue = this.followUp && !isSignOff(message.text);
     if (this.discardReply && REPLY_MESSAGES.includes(message.type)) return;
 
     this.dispatch({ kind: local ? 'local' : 'server', message });
@@ -268,12 +288,24 @@ export class HostController {
     this.press();
   }
 
+  /** The microphone's loudness as numbers: the loudest frame, the room's floor, and the level that counted as speech. */
+  private levels(): string {
+    const stats = this.endpoint?.stats;
+    return stats ? `loudest ${stats.peak.toFixed(3)}, room ${stats.floor.toFixed(3)}, speech above ${stats.threshold.toFixed(3)}` : 'no endpoint';
+  }
+
   /** One microphone level per frame while listening. Ends or drops the turn when the person goes quiet. */
   onLevel(level: number): void {
     if (this.state.phase !== 'listening' || !this.endpoint || this.now() < this.guardUntil) return;
     const event = this.endpoint.feed(level);
-    if (event === 'speech_ended') this.command('summon');
-    else if (event === 'no_speech') this.cancelListening();
+    if (event === 'speech_started') this.diagnostic(`listen: speech began ${this.endpoint.stats.listenedMs} ms in (${this.levels()})`);
+    if (event === 'speech_ended') {
+      this.diagnostic(`listen: speech ended after ${this.endpoint.stats.listenedMs} ms (spoke ${this.endpoint.stats.speechMs} ms, ${this.levels()})`);
+      this.command('summon');
+    } else if (event === 'no_speech') {
+      this.diagnostic(`listen: no speech in ${this.endpoint.stats.listenedMs} ms (${this.levels()}, ${this.endpoint.stats.frames} frames)`);
+      this.cancelListening();
+    }
   }
 
   /**
@@ -415,6 +447,19 @@ export class HostController {
     }
   }
 
+  /** The timeline of a turn, from what the server says: how long each step took. Sizes and codes only, never words. */
+  private traceServer(message: ServerMessage): void {
+    const since = this.inputEndedAt ? `${this.now() - this.inputEndedAt} ms after the question was sent` : 'outside a question';
+
+    if (message.type === 'transcript.final') this.diagnostic(`turn: heard you, ${since}`);
+    else if (message.type === 'assistant.text.delta' && !this.firstTextAt) {
+      this.firstTextAt = this.now();
+      this.diagnostic(`turn: the reply began, ${since}`);
+    } else if (message.type === 'assistant.text.done') this.diagnostic(`turn: the reply was complete, ${since}`);
+    else if (message.type === 'error') this.diagnostic(`turn: error ${message.code} (retryable ${message.retryable}), ${since}`);
+    else if (message.type === 'session.closed') this.diagnostic('turn: the session closed');
+  }
+
   /** Cuts off whatever is being said, whether the server is sending it or this device is making it. */
   private silence(): void {
     this.deviceSpeech?.cancel();
@@ -436,6 +481,8 @@ export class HostController {
     // Each utterance gets an id so a late answer to an earlier one cannot be mistaken for this one.
     const utteranceId = `host-${++this.utteranceCount}`;
     this.expectedUtterance = utteranceId;
+    this.inputEndedAt = this.now();
+    this.firstTextAt = 0;
     this.link.send({ v: 1, type: 'input.end', utteranceId });
   }
 
@@ -453,6 +500,8 @@ export class HostController {
           this.listenWhenDrained = false;
           // Anything still playing would be heard by the microphone as the person speaking.
           this.silence();
+          this.listenOpenedAt = this.now();
+          this.diagnostic(`listen: opened (${this.quietListen ? 'follow-up' : 'asked for'}, wake microphone ${this.wakeMicOn ? 'was open' : 'was not open'}, ignoring the first ${this.guardUntil ? this.guardUntil - this.now() : 0} ms)`);
           this.audio.chime('listening');
           this.audio.startCapture();
           this.dispatch({ kind: 'ui', action: { type: 'listen_start' } });
@@ -460,11 +509,15 @@ export class HostController {
           this.cap = setTimeout(() => this.command('summon'), MAX_UTTERANCE_MS);
         } else {
           clearTimeout(this.cap);
+          this.diagnostic(`listen: closed after ${this.now() - this.listenOpenedAt} ms (${this.levels()})`);
           this.audio.stopCapture();
           this.audio.chime('thinking');
           this.dispatch({ kind: 'ui', action: { type: 'listen_end' } });
           clearTimeout(this.waiting);
-          this.waiting = setTimeout(() => this.dispatch({ kind: 'ui', action: { type: 'no_response' } }), this.noResponseMs);
+          this.waiting = setTimeout(() => {
+            this.diagnostic(`turn: nothing came back ${this.noResponseMs} ms after the question was sent`);
+            this.dispatch({ kind: 'ui', action: { type: 'no_response' } });
+          }, this.noResponseMs);
         }
         return;
       case 'send':

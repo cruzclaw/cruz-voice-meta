@@ -14,9 +14,40 @@ describe('the panel pages', () => {
     for (const kind of ATTENTION_KINDS) {
       const declared = new RegExp(`--attn-${kind}:\\s*(#[0-9a-fA-F]{6})`).exec(css)?.[1];
       assert.equal(declared?.toLowerCase(), ATTENTION_COLORS[kind].toLowerCase(), kind);
-      assert.match(css, new RegExp(`\\.seg-${kind}\\s*\\{[^}]*var\\(--attn-${kind}\\)`), `strip colour for ${kind}`);
       assert.match(css, new RegExp(`\\.dot-${kind}\\s*\\{[^}]*var\\(--attn-${kind}\\)`), `dot colour for ${kind}`);
     }
+  });
+
+  it('colour the strip as one flowing gradient from the waiting kinds, right to left, not as separate blocks', () => {
+    assert.match(js, /var\(--attn-\$\{kind\}\)/);
+    assert.match(js, /colour\(attentionKinds\[0\]\)\]/, 'the first colour closes the loop');
+    assert.match(css, /\.hue\s*\{[^}]*background:\s*linear-gradient\(90deg in oklch,\s*var\(--stops\)\)/);
+    assert.match(css, /@keyframes hue-flow\s*\{\s*to\s*\{\s*background-position:\s*200% 0/);
+    assert.equal(/\.seg/.test(css) || /createElement\('span'\);\s*seg\./.test(js), false, 'no separate blocks');
+  });
+
+  it('show an orange glow from the centre outwards, bright to dark, for as long as the employee is thinking', () => {
+    assert.match(css, /\.hue\.is-thinking\s*\{[^}]*radial-gradient\(ellipse farthest-side at 50% 50%,\s*#ffd699 0%,\s*#ff9a1f var\(--glow\),\s*#8a3a00 100%\)/);
+    assert.match(css, /@keyframes hue-breathe/);
+    assert.match(js, /thinking = s\.display === 'thinking' \|\| s\.display === 'task_working'/);
+    assert.match(js, /hue\.hidden = attentionKinds\.length === 0 && !thinking/);
+  });
+
+  it('let thinking take over the strip while it lasts, and give the waiting colours back when it stops', () => {
+    // The thinking rule is declared after, and is more specific than, the waiting gradient, so it wins whatever is waiting.
+    assert.ok(css.indexOf('.hue.is-thinking {') > css.indexOf('.hue {'));
+    assert.match(css, /\.hue\.is-thinking\s*\{[^}]*background:\s*radial-gradient/);
+    // The waiting colours are kept, not cleared, while thinking: showHue sets them whenever something is waiting.
+    assert.match(js, /hue\.classList\.toggle\('is-thinking', thinking\)/);
+    assert.match(js, /if \(stops\.length\) hue\.style\.setProperty\('--stops'/);
+    assert.match(js, /hue\.setAttribute\('aria-label', thinking \? 'Thinking' : attentionLabel\)/);
+  });
+
+  it('stop the strip moving when Windows asks for less motion, and keep it visible', () => {
+    const reduced = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\r?\n\}/.exec(css)?.[1] ?? '';
+    assert.match(reduced, /\.hue\s*\{\s*animation:\s*none;?\s*\}/);
+    assert.match(reduced, /\.hue\.is-thinking\s*\{[^}]*animation:\s*none;[^}]*--glow:\s*45%/);
+    assert.equal(/\.hue[^{]*\{[^}]*(display:\s*none|opacity:\s*0)/.test(reduced), false, 'it is not hidden');
   });
 
   it('keep the attention colours out of the conversation colours, so blue only ever means an acknowledgement in the strip', () => {
@@ -40,6 +71,44 @@ describe('the panel pages', () => {
     assert.equal(/\sstyle\s*=/.test(html), false);
   });
 
+  it('put the speaker test button immediately before the minimise button, and keep it out of the minimised bar', () => {
+    const test = html.indexOf('id="test-audio"');
+    const minimize = html.indexOf('id="minimize"');
+    const close = html.indexOf('id="close"');
+
+    assert.ok(test > html.indexOf('<header>') && test < minimize && minimize < close, 'speaker, then minimise, then close');
+    // Nothing sits between the speaker button and the minimise button.
+    assert.equal(/<button/.test(html.slice(html.indexOf('</button>', test) + 9, html.lastIndexOf('<button', minimize))), false);
+    assert.match(css, /\.head-test\s*\{\s*right:\s*70px/);
+    assert.match(css, /body\.is-mini[^{]*\.audio-test[^{]*\{[^}]*display:\s*none/);
+  });
+
+  it('run the speaker test through the host: it plays, says Testing audio, asks whether it was heard, and starts no call', () => {
+    assert.match(preload, /testAudio: \(\) => ipcRenderer\.send\('panel-test-audio'\)/);
+    assert.match(preload, /audioHeard: \(heard\) => ipcRenderer\.send\('panel-audio-heard', heard === true\)/);
+    assert.match(preload, /onAudioTest: /);
+    assert.ok(html.includes('id="audio-test"') && html.includes('id="audio-heard"') && html.includes('id="audio-not-heard"'));
+    // The page asks and shows; it never plays anything and never touches a call or the microphone.
+    const testJs = js.slice(js.indexOf('const audioTest ='));
+    for (const forbidden of ['new Audio(', 'AudioContext', 'getUserMedia', '.talk(', '.hangup(', '.mute(']) assert.equal(testJs.includes(forbidden), false, forbidden);
+    assert.match(testJs, /window\.panel\.testAudio\(\)/);
+    assert.match(testJs, /window\.panel\.audioHeard\(true\)/);
+    assert.match(testJs, /window\.panel\.audioHeard\(false\)/);
+  });
+
+  it('say the right words at each step of the speaker test, and show an error when playback fails', () => {
+    const host = readFileSync(new URL('../src/host.ts', import.meta.url), 'utf8');
+
+    assert.match(host, /pushAudioTest\('testing', 'Testing audio…'\)/);
+    assert.match(host, /pushAudioTest\('ask', 'Did you hear it\?'\)/);
+    assert.match(host, /pushAudioTest\('error', `The test sound could not be played/);
+    assert.match(host, /pushAudioTest\('busy', 'Cruz is speaking or in a call right now/);
+    // Playing it is the same path as announcements and replies: the voice process, then the audio window.
+    assert.match(host, /const result = await announceNow\(TEST_PHRASE\)/);
+    // It only asks after sound was confirmed, and never claims the person heard it.
+    assert.equal(/pushAudioTest\('yes'[^;]*\);\s*$/m.test(host.slice(0, host.indexOf('function answerAudioTest'))), false);
+  });
+
   it('only look up elements that exist', () => {
     const ids = [...js.matchAll(/\$\('([\w-]+)'\)/g)].map((m) => m[1]!);
     for (const id of new Set(ids)) assert.ok(html.includes(`id="${id}"`), `#${id} is used by panel.js but not in panel.html`);
@@ -53,17 +122,13 @@ describe('the panel pages', () => {
   });
 
   it('stay quiet: no sound, no speech and no focus calls come from the attention code', () => {
-    const attentionJs = js.slice(js.indexOf('const hue'));
+    const attentionJs = js.slice(js.indexOf('const hue'), js.indexOf('// The speaker test.'));
     for (const noisy of ['Audio', 'speechSynthesis', 'Notification', '.focus(', 'play(', 'beep']) assert.equal(attentionJs.includes(noisy), false, noisy);
   });
 
   it('do not announce changes to a screen reader by themselves', () => {
     assert.equal(/id="attention"[^>]*aria-live/.test(html), false);
     assert.equal(/id="hue"[^>]*aria-live/.test(html), false);
-  });
-
-  it('stop the flowing motion for people who ask for less motion', () => {
-    assert.match(css, /prefers-reduced-motion[\s\S]*\.seg\s*\{\s*animation:\s*none/);
   });
 
   it('let the person choose the employee from the panel itself, and hand only an id to the app', () => {
@@ -90,7 +155,7 @@ describe('the panel pages', () => {
   });
 
   it('keep the strip crisp on the small bar, and keep the content of the bar out from under it', () => {
-    assert.match(css, /body\.is-mini \.seg\s*\{[^}]*box-shadow:\s*none/);
+    assert.match(css, /body\.is-mini \.hue\s*\{[^}]*box-shadow:\s*none/);
     assert.match(css, /\.mini\s*\{[^}]*padding:\s*4px /, 'the bar starts below the 4px strip');
     assert.match(css, /\.hue\s*\{[^}]*height:\s*4px/);
   });
