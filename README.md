@@ -2,7 +2,7 @@
 
 Voice modules for talking to a virtual employee, with a standalone synthetic demo and an embeddable Windows host. Built during the Meta AI developer hackathon, starting **26 October 2026**.
 
-**Status updated: 29 October 2026 (Asia/Kolkata).** [v0.2.2](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.2) is published and verified. The Windows integration has been installed and exercised with earlier packages. The real-employee gateway is now deployed and a live identity/context probe passed. The updated guard reported from the target runtime. The complete plugin sync and installed v0.2.2 live acceptance remain **open**. A published package is not evidence that a production app uses it.
+**Status updated: 30 October 2026 (Asia/Kolkata).** [v0.2.4](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.4) is published, verified, pinned and installed in the integrated Windows app from a clean build. The real employee gateway routes voice through **Muse Spark**; a successful provider response and account usage were verified, and the owner confirmed that the app hears the question and speaks the correct identity answer. The attention review page and its migration are deployed. **Spoken follow-ups after a call are not yet delivered as a complete production chain.** Tool-read, interruption, approval-before-send/single-delivery and final installed acceptance remain open.
 
 This README records the agreed product plan and its delivery history. A checked item means only the named milestone is complete, not that every acceptance criterion for its workstream passed.
 
@@ -104,27 +104,28 @@ The integrated app uses its existing sign-in and consent controls; the standalon
 
 References are the original Linear work items. Their workflow labels can lag evidence; this table does not treat “Done” as proof of live acceptance. **Released** means a public artifact exists; **local** means implementation/tests only; **pending** means the stated acceptance is still outstanding.
 
-| Work item | Agreed scope and acceptance | Evidence/status at 29 October |
+| Work item | Agreed scope and acceptance | Evidence/status at 30 October |
 | --- | --- | --- |
-| CRU-659 Packaging and flags | Existing app, original icon, install/upgrade/uninstall, startup/restore, rollback, signed package/Store compatibility; voice gated per account | Earlier unsigned installer installed and icon corrected; clean builds demonstrated. Signed-package, full lifecycle and Store acceptance pending |
-| CRU-660 Windows interaction | Tray, shortcut, startup pad, matching widths, employee choice, silent colours, explicit review, honest readiness | Public v0.2.1 released; integrated installer exercised. v0.2.2 installation reported complete; visual/audio live journey pending |
-| CRU-661 Wake/privacy | Local opt-in wake, clear microphone state, mute/disable, no audio upload while idle, recovery and real-room accuracy | Detector and bundled model tested locally; saved-consent behaviour implemented. Real-room/noise certification pending |
-| CRU-662 Gateway/protocol | Server-owned identity, employee ownership, single-use tickets, TLS, limits, heartbeat/revocation, cancellation; durable conversation separate from audio | Transport and private access checks implemented/tested; earlier edge authentication probe verified. Complete reconnect/replay and latest gateway rollout acceptance pending |
-| CRU-663 Speech recognition | Meta provider, speech boundaries, final/partial transcripts, duplicate prevention, language/business-name accuracy, usage | Adapter and endpointing implemented. Current recognition is per utterance after input ends; partial transcripts, WER dataset and metering acceptance remain open |
-| CRU-664 Reasoning | Meta conversational adapter, grounded tools, truthful capability/context and safe proposals | Public adapter released. Real product must use selected employee's gateway; that private bridge is deployed and passed a live identity/context probe; broader acceptance remains open |
-| CRU-665 Speech output | Streaming playback queue, cancellation, voice controls/personalization and reliable device output | Device Kokoro released; playback-confirmation fix released in v0.2.2. Full personalization and live cold/warm latency acceptance pending |
-| CRU-666 Turns/corrections | Listening/thinking/speaking states, cut-in, stale audio rejection; stopping speech distinct from cancelling durable work; no duplicate sends | Cut-in/state/playback tests pass. Automatic full-duplex behaviour and task-safe correction scenarios are not fully certified live |
-| CRU-667 Durable work | Existing jobs/commitments/ledger, stable IDs and idempotency, queued/running/awaiting-input/approval/completed/failed/cancelled progress, reconnect survival | Contract and private bridge work exist. Continued conversation during durable work, restart survival and real completion evidence pending |
-| CRU-668 Approvals/disclosure | Exact recipient/content/scope approval, edited/revoked approval rejected, once-only dispatch, existing recipient policy, read/pass never authorizes | Session-origin and integration-path enforcement reviewed/tested locally. Target guard confirmed in real Redis and gateway identity probe passed; approval/send acceptance pending; not a universal certification of delegated/scheduled or arbitrary runtime actions |
-| CRU-669 Usage/cost | Per-account/session/employee ASR, reasoning and TTS usage, budgets, traceability, retention consent and measured credit applicability | Planned certification; do not assume hackathon credits cover third-party speech or claim a completed cost dashboard |
-| CRU-670 Regression/certification | Cross-account tests, interruption, reconnect, failures, approval leakage, real Windows/provider acceptance and repeatable demo | Automated suites and scale checks exist. Full installed/live certification remains open |
-| CRU-675 Showcase | Three-minute demonstration of new event work, real Meta use, governed task, interruption and measurable time/attention savings | Planned; final video, measurements and submission receipt pending |
-| CRU-676 Public repository | Independent history, licence, secret scanning, public source, contribution/security and branch protections | Repo/source/licence/scanning present; outstanding governance checks must not be inferred from release success |
-| CRU-677 Host API | Versioned DTOs, mock/private conformance, context, tasks, approvals, cancellation and progress; no proprietary code published | Public contract and conformance released, private adapter tested. Complete real-host acceptance pending |
-| CRU-678 Standalone demonstration | Independent synthetic demo, optional real Meta server credentials, wake/keyboard, speech, interruption, task/approval simulation; reproducible walkthrough | Runnable code exists; full recorded/certified walkthrough pending |
-| CRU-679 Release integration | CI, history/secret/license audit, builds, checksums, SBOM/provenance, pinned private dependencies, installer smoke and normal deployment | v0.1.0–v0.2.2 released. v0.2.2 signatures/checksums verified. Latest app pin/installer reported complete and backend deployed; complete sync/live acceptance pending; private CI failure cause remains unresolved |
+| CRU-659 Packaging and flags | Existing app, original icon, install/upgrade/uninstall, startup/restore, rollback, signed package/Store compatibility; voice gated per account | In Review: clean unsigned replacement installed with original icon and bundled wake model. Signing/Store and complete lifecycle acceptance remain open |
+| CRU-660 Windows interaction | Tray, shortcut, startup pad, matching widths, employee choice, silent colours, explicit review, honest readiness | In Review: v0.2.4 installed; 135 app tests and 84 real-app/mock-backend checks passed. Includes speaker test, gradient, reconnect and attention navigation. Final visual/live acceptance open |
+| CRU-661 Wake/privacy | Local opt-in wake, clear microphone state, mute/disable, no audio upload while idle, recovery and real-room accuracy | In Review: bundled detector and wake reconnect/interruption installed; owner previously confirmed human wake. Replacement-build restart/noisy-room acceptance remains open |
+| CRU-662 Gateway/protocol | Server-owned identity, employee ownership, single-use tickets, TLS, limits, heartbeat/revocation, cancellation; durable conversation separate from audio | In Review: authenticated gateway deployed and used by the accepted live Spark call. Complete reconnect/replay, isolation and durable-task acceptance evidence remains open |
+| CRU-663 Speech recognition | Meta provider, speech boundaries, final/partial transcripts, duplicate prevention, language/business-name accuracy, usage | In Review: Meta transcription works in the accepted live call. Current recognition is per utterance; partial transcripts, WER dataset and full metering certification remain open |
+| CRU-664 Reasoning | Meta conversational adapter, grounded tools, truthful capability/context and safe proposals | In Progress: actual Spark response, account ledger usage and owner-confirmed audible identity accepted. Permitted tool read, interruption and governed-send acceptance remain open |
+| CRU-665 Speech output | Streaming playback queue, cancellation, voice controls/personalization and reliable device output | In Review: device Kokoro and v0.2.4 playback/stall handling installed; packaged real-audio test passed. Live alignment/interruption, personalization and current end-to-end timings remain open |
+| CRU-666 Turns/corrections | Listening/thinking/speaking states, cut-in, stale audio rejection; stopping speech distinct from cancelling durable work; no duplicate sends | In Review: turn handling, wake cut-in and sign-off released/installed. Live Spark interruption and task-safe correction/no-duplicate-send acceptance remain open |
+| CRU-667 Durable work | Existing jobs/commitments/ledger, stable IDs and idempotency, queued/running/awaiting-input/approval/completed/failed/cancelled progress, reconnect survival | In Progress: existing private follow-up implementation remains separate and unshipped as a complete chain. Public announce support is released; private integration, backend/plugin rollout and real reply-after-call acceptance remain |
+| CRU-668 Approvals/disclosure | Exact recipient/content/scope approval, edited/revoked approval rejected, once-only dispatch, existing recipient policy, read/pass never authorizes | In Review: voice-origin and disclosure enforcement implemented/deployed. Exact-payload approval and one confirmed live Spark delivery still need evidence; no universal delegated/runtime-action certification claimed |
+| CRU-669 Usage/cost | Per-account/session/employee ASR, reasoning and TTS usage, budgets, traceability, retention consent and measured credit applicability | In Progress: real Spark account usage recorded. Output weight 3.4; no extra Spark daily cap by owner decision, normal account limits remain. ASR/session costs, credit applicability and complete reporting certification remain open |
+| CRU-670 Regression/certification | Cross-account tests, interruption, reconnect, failures, approval leakage, real Windows/provider acceptance and repeatable demo | In Progress: v0.2.4 has 381 public tests, four-scale rendered checks, 135 app tests and 84 real-app/mock checks. Live certification and Spark-correlated end-speech-to-first-audio benchmarks remain |
+| CRU-675 Showcase | Three-minute demonstration of new event work, real Meta use, governed task, interruption and measurable time/attention savings | Todo: final three-minute video, measured outcomes and submission package/receipt remain open; distinguish new event work from existing infrastructure |
+| CRU-676 Public repository | Independent history, licence, secret scanning, public source, contribution/security and branch protections | In Review: independent public source, Apache-2.0 and releases through v0.2.4 exist. Branch-protection, public-boundary/history evidence and anonymous submission-access checks remain to reconcile |
+| CRU-677 Host API | Versioned DTOs, mock/private conformance, context, tasks, approvals, cancellation and progress; no proprietary code published | In Review: public contracts and private pinned adapter are in use. Complete conformance/progress-replay acceptance, including CRU-667, remains open |
+| CRU-678 Standalone demonstration | Independent synthetic demo, optional real Meta server credentials, wake/keyboard, speech, interruption, task/approval simulation; reproducible walkthrough | Todo: runnable demo code exists; fresh-clone independence and real-versus-mock walkthrough certification remain unverified. Audit existing demo before assigning repairs |
+| CRU-679 Release integration | CI, history/secret/license audit, builds, checksums, SBOM/provenance, pinned private dependencies, installer smoke and normal deployment | In Review: v0.2.4 public CI/release passed; four checksums and host cryptographic provenance verified; private pin and clean installed build complete. Private CI remains failed under the reported quota constraint, separate from local passes |
+| CRU-685 Attention review | Inspect the items behind the strip, safe failure reasons, same-action recovery, bounded refresh and theme-aware popups | In Review: backend/dashboard and migration deployed; review navigation and theme changes installed. Live count/list agreement, recovery, refresh/restart and visual theme acceptance remain |
 
-### Later extensions — not prerequisites for the current Windows milestone
+### Later extensions - Backlog, outside the current hackathon delivery
 
 | Work item | Planned scope | Status |
 | --- | --- | --- |
@@ -137,7 +138,7 @@ The pre-existing employee platform and unrelated source-monitoring work are depe
 
 ## Dated completion ledger
 
-All entries below were reconstructed on **29 October 2026** from repository history, release evidence and implementation reports. Dates group work by the project day in Asia/Kolkata; report-based host milestones are labelled. They are not backdated claims of contemporaneous review. A completion is limited to the wording of its line.
+The 26-29 October entries below were reconstructed on **29 October 2026** from repository history, release evidence and implementation reports. Dates group work by the project day in Asia/Kolkata; report-based host milestones are labelled. They are not backdated claims of contemporaneous review. A completion is limited to the wording of its line. The 30 October entries record subsequent verified milestones; older open checkboxes describe their dated checkpoint, not the current task list.
 
 ### 26 October 2026
 
@@ -187,6 +188,19 @@ All entries below were reconstructed on **29 October 2026** from repository hist
 
 - [x] **Installed wake-model packaging repair (29 October)**: the consuming Windows app now rejects packages missing required model assets and reports detector startup failures. Reviewer passed 113 app tests and confirmed installed assets and packaged/installed app hashes match. Implementer reports synthesized-speaker wake recognition before and after restart. Real-person wake and microphone-to-answer acceptance remain open.
 
+### 30 October 2026
+
+- [x] **Real employee/Spark identity journey accepted**: provider/model selection and account usage were verified through the host integration; the owner confirmed microphone input and the correct spoken identity answer. This does not certify tool actions or sends.
+- [x] **Attention review backend and dashboard deployed**, including the notification-resolution migration. The page responded successfully and its unauthenticated API rejected access. Same-action recovery and the final owner-visible count/theme journey remain live acceptance work (CRU-685).
+- [x] **Announcement stall correction reviewed** ([ac10c44](https://github.com/cruzclaw/cruz-voice-meta/commit/ac10c44)): a timed-out playback is failed even if audio began. Eight regression tests cover completion, stall, silence, stop and unavailable/busy cases. The stall was simulated, not induced on a physical speaker.
+- [x] **v0.2.4 published** from `43facf9f13e851e375a77e38ef2c58bf6ad70341`; [PR #11](https://github.com/cruzclaw/cruz-voice-meta/pull/11) merged. Public test/audit/secrets and release workflows passed. All four downloaded tarballs matched published checksums; the host attestation was cryptographically verified. SBOM: CycloneDX 1.6, 83 components.
+- [x] **Release verification**: 381 public tests and typecheck passed; rendered checks passed at 100%, 125%, 150% and 200% scaling. The gradient, temporary orange thinking override and reduced-motion presentation are documented.
+- [x] **Private host pin, clean build and replacement installation completed**: 135 app tests, 84 real-app/mock-backend integration checks and packaged wake/speech self-tests passed. Installed archive/host bytes match the clean build. The installer preserves the original icon and wake assets and remains unsigned. Backend production behavior was not changed by this desktop installation.
+- [x] **Linear roadmap reconciled**: 12 tickets In Review, four In Progress, two Todo and four later extensions in Backlog. Implemented work is no longer represented as unstarted; acceptance remains open rather than automatically marked Done.
+- [ ] **Live Spark certification**: permitted read, interruption, exact approval before a send, one confirmed delivery and measured speech-end-to-first-audio latency.
+- [ ] **CRU-667 complete follow-up rollout**: public announcement support is released, but private integration/plugin deployment and the real reply-after-call journey remain open. Ordinary updates stay silent unless an explicit spoken follow-up was arranged.
+- [ ] **Final installed attention/wake acceptance, independent public demo and showcase/submission evidence** remain open.
+
 ### Release register
 
 The links are authoritative for publication timestamps and assets; the dated sections above describe source work, not necessarily publication time.
@@ -197,16 +211,17 @@ The links are authoritative for publication timestamps and assets; the dated sec
 | [v0.2.0](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.0) | `fd4e3ea0a7dbe84959db160bb04bd2ea50507b0d` | Windows host added: four tarballs; attention/library and lifecycle fixes |
 | [v0.2.1](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.1) | `1f124d408d923da7f23d4f6b6c0f4ac3b6fa6e99` | Startup pad, employee selection/readiness and compact strip |
 | [v0.2.2](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.2) | `890ac778e9bb8594986d059b497d60ba5fcb33bb` | Playback confirmation/failure and timing |
+| [v0.2.3](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.3) | `bf6891193dfffaf366ea169f4bad58d5a594ac5e` | Intermediate published package release; see release source for changes |
+| [v0.2.4](https://github.com/cruzclaw/cruz-voice-meta/releases/tag/v0.2.4) | `43facf9f13e851e375a77e38ef2c58bf6ad70341` | Consolidated Windows host: wake interruption/sign-off, speaker test, announcement stall failure, gradient and reduced motion; pinned and installed |
 
 ## Next milestone and acceptance gate
 
-1. Pin verified v0.2.2 assets in the consuming app/backend and validate a clean checkout.
-2. Complete private PR/deployment coordination, recording the unresolved private CI result separately from local tests. Deploy through the host's normal reviewed process.
-3. Sync the updated employee plugin to a controlled target and verify guard registration with the real runtime and Redis; verify ordinary dashboard behaviour remains correct.
-4. Build/install the pinned app, then test the selected employee's real context and permitted tools. No canned identity/connectivity answers.
-5. Demonstrate audible replies, correct mailbox, exact owner approval before a send, exactly one dispatch, read/pass/list identity, cancellation, sign-out/account switch and attention review.
-6. Measure **end of user speech to first audible output**, including cold and warm runs. Earlier local speech-start measurements are not this end-to-end metric.
-7. Record evidence against each line before closing the corresponding issue or claiming live readiness.
+1. Complete the coordinated live Spark acceptance: permitted read, interruption, exact owner approval before a send and one confirmed delivery. Preserve ordinary dashboard behavior.
+2. Review and integrate the existing CRU-667 private follow-up chain, deploy/sync through the host's normal process, and test actual reply-after-call content, stop/sign-out and replay behavior. Public announcement support alone is not completion.
+3. Accept the installed attention review/count/recovery/theme and wake journeys. Keep evidence scoped to the tested build and account.
+4. Measure **end of user speech to first audible output**, including cold and warm Spark runs. Mixed-model and text-only timings are not this metric.
+5. Verify the existing standalone public demo from a fresh clone without private dependencies, then produce the three-minute showcase and submission evidence.
+6. Record evidence against each acceptance line before closing its issue. Phone/number/meeting/multimodal extensions, the independent ledger project and the parked owner-send proposal are outside this delivery.
 
 ## Verification, risks and maintenance
 
