@@ -32,6 +32,7 @@ import {
   type Readiness,
   type VoiceEmployee,
 } from '@cruzclaw/windows-bridge';
+import { createAnnouncer, type AnnounceResult } from './announcer.js';
 import { VoiceClient } from './client.js';
 import { ConnectionError, type ConnectionProvider } from './connection.js';
 import { HostController, type AudioDevice } from './controller.js';
@@ -94,7 +95,7 @@ export interface VoiceHostOptions {
   onEmployeeChoose?: (id: string) => void;
 }
 
-export type AnnounceResult = 'played' | 'stopped' | 'failed' | 'busy';
+export type { AnnounceResult } from './announcer.js';
 
 export interface VoiceHost {
   readonly controller: HostController;
@@ -277,105 +278,19 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     listenForWake: (on) => toAudio(on ? needAudio() : audioIfOpen(), 'wake-mic', on),
   };
 
-  // ---- announcements: words said on the speaker with no call ----
+  // ---- announcements: words said on the speaker with no call (see announcer.ts) ----
 
-  interface Announcement {
-    audible: boolean;
-    abort: AbortController;
-    onStarted(): void;
-    onFailed(why: string): void;
-    onDrained(): void;
-    stop(): void;
-  }
-  let announcement: Announcement | undefined;
-  /** Why the last announcement or speaker test could not be played, in the host's own words. Empty when it played. */
-  let announceFailure = '';
-  /** How long sound may take to begin once it has been handed to the speaker, and how long a whole announcement may take. */
-  const ANNOUNCE_AUDIBLE_MS = 8000;
-  const ANNOUNCE_TOTAL_MS = 60000;
-
-  function announceNow(text: string): Promise<AnnounceResult> {
-    const spoken = typeof text === 'string' ? text.trim().slice(0, 500) : '';
-    if (disposed || !speech || !spoken) {
-      announceFailure = !speech ? 'the voice on this computer is not available' : 'there was nothing to say';
-      return Promise.resolve('failed');
-    }
-    // Never over a call, and never over another announcement or anything else the speaker is playing.
-    if (announcement || controller.inCall || speakerBusy) return Promise.resolve('busy');
-    needAudio();
-    announceFailure = '';
-    return new Promise<AnnounceResult>((resolve) => {
-      let settled = false;
-      let made = false;
-      let audibleTimer: ReturnType<typeof setTimeout> | undefined;
-      const abort = new AbortController();
-      const finish = (result: AnnounceResult): void => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(audibleTimer);
-        clearTimeout(totalTimer);
-        if (announcement === run) announcement = undefined;
-        resolve(result);
-      };
-      const cut = (result: AnnounceResult): void => {
-        abort.abort();
-        audio.stopPlayback();
-        finish(result);
-      };
-      const run: Announcement = {
-        audible: false,
-        abort,
-        onStarted: () => {
-          run.audible = true;
-          clearTimeout(audibleTimer);
-        },
-        onFailed: (why) => {
-          log(`announcement: playback failed: ${why}`);
-          announceFailure = why;
-          cut('failed');
-        },
-        onDrained: () => {
-          if (made) finish(run.audible ? 'played' : 'failed');
-        },
-        stop: () => cut('stopped'),
-      };
-      const totalTimer = setTimeout(() => {
-        log('announcement: it did not finish in time');
-        cut(run.audible ? 'played' : 'failed');
-      }, ANNOUNCE_TOTAL_MS);
-      announcement = run;
-      log('announcement: started');
-      void (async () => {
-        let first = true;
-        try {
-          for await (const pcm of speech.synthesize(spoken, abort.signal)) {
-            if (abort.signal.aborted) return;
-            audio.play(pcm);
-            if (first) {
-              first = false;
-              audibleTimer = setTimeout(() => {
-                if (!run.audible) {
-                  log('announcement: the speaker did not confirm any sound');
-                  announceFailure = 'the speaker did not confirm any sound';
-                  cut('failed');
-                }
-              }, ANNOUNCE_AUDIBLE_MS);
-            }
-          }
-          if (abort.signal.aborted) return;
-          made = true;
-          // The speaker may already have said it is quiet, before the last chunk was made.
-          if (first) finish('failed');
-          else if (!speakerBusy) finish(run.audible ? 'played' : 'failed');
-        } catch (e) {
-          if (abort.signal.aborted) return;
-          log(`announcement: the voice failed: ${e instanceof Error ? e.message : 'unknown'}`);
-          announceFailure = e instanceof Error ? e.message.slice(0, 120) : 'the voice failed';
-          cut('failed');
-        }
-      })();
-    });
-  }
+  const announcer = createAnnouncer({
+    speech,
+    isDisposed: () => disposed,
+    inCall: () => controller.inCall,
+    speakerBusy: () => speakerBusy,
+    prepare: () => void needAudio(),
+    play: (pcm) => audio.play(pcm),
+    stopPlayback: () => audio.stopPlayback(),
+    log: (line) => log(line),
+  });
+  const announceNow = announcer.announce;
 
   // ---- the speaker test ----
 
@@ -405,8 +320,8 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
         log('audio test: stopped');
         pushAudioTest('idle');
       } else {
-        log(`audio test: failed (${announceFailure || 'no reason given'})`);
-        pushAudioTest('error', `The test sound could not be played${announceFailure ? `: ${announceFailure}` : '.'} Check the sound output in Windows.`);
+        log(`audio test: failed (${announcer.failure() || 'no reason given'})`);
+        pushAudioTest('error', `The test sound could not be played${announcer.failure() ? `: ${announcer.failure()}` : '.'} Check the sound output in Windows.`);
       }
     } finally {
       audioTesting = false;
@@ -437,7 +352,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       onDiagnostic: (line) => log(line),
       onWake: (phrase: string) => {
         log(`wake phrase heard: ${phrase}`);
-        announcement?.stop();
+        announcer.stop();
         options.onWake?.(phrase);
         if (!panel || !panel.isVisible()) showPanelSilently();
       },
@@ -763,7 +678,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     // Only the report that covers every chunk sent so far means the speaker is quiet.
     if (!fromAudio(event) || count !== chunksSent) return;
     speakerBusy = false;
-    announcement?.onDrained();
+    announcer.onDrained();
     controller.onPlaybackDrained();
   });
   on('playback-failed', (event, stops: unknown, reason: unknown) => {
@@ -771,7 +686,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     if (!fromAudio(event) || stops !== stopsSent) return;
     const why = typeof reason === 'string' ? reason.slice(0, 120) : 'unknown';
     log(`speaker: playback failed: ${why}`);
-    announcement?.onFailed(why);
+    announcer.onFailed(why);
     controller.onPlaybackFailed(why);
   });
   on('playback-started', (event, stops: unknown) => {
@@ -782,7 +697,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     // The one number that matters to the person: from the end of what they said to the first sound they hear.
     if (inputEndedAt) log(`latency: first sound ${now - inputEndedAt} ms after the end of speech`);
     inputEndedAt = 0;
-    announcement?.onStarted();
+    announcer.onStarted();
     controller.onPlaybackStarted();
   });
   on('audio-ready', (event) => {
@@ -856,7 +771,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
    */
   function pressNow(): void {
     // Starting a call ends what is being announced: the person is here and wants the call.
-    announcement?.stop();
+    announcer.stop();
     if (!canCall(effectiveReadiness())) {
       log(`call not started: ${effectiveReadiness().state}`);
       return;
@@ -886,7 +801,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       controller.hangUp();
     },
     endSession: (reason = 'signed_out') => {
-      announcement?.stop();
+      announcer.stop();
       pendingPress.clear();
       clearTimeout(reconnectTimer);
       reconnectTimer = undefined;
@@ -954,9 +869,9 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
       return !!wakeDetector;
     },
     announce: announceNow,
-    stopAnnouncement: () => announcement?.stop(),
+    stopAnnouncement: () => announcer.stop(),
     get announcing() {
-      return !!announcement;
+      return announcer.active;
     },
     testSpeaker: () => toAudio(needAudio(), 'beep'),
     async selfTest() {
@@ -982,7 +897,7 @@ export function createVoiceHost(options: VoiceHostOptions): VoiceHost {
     },
     describe: () => ({ visible: !!panel && panel.isVisible(), mini, bounds: panel?.getBounds(), attention }),
     dispose() {
-      announcement?.stop();
+      announcer.stop();
       disposed = true;
       clearTimeout(reconnectTimer);
       controller.dispose();
