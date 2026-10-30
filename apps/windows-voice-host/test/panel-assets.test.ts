@@ -33,6 +33,23 @@ describe('the panel pages', () => {
     assert.match(js, /hue\.hidden = attentionKinds\.length === 0 && !thinking/);
   });
 
+  it('let thinking take over the strip while it lasts, and give the waiting colours back when it stops', () => {
+    // The thinking rule is declared after, and is more specific than, the waiting gradient, so it wins whatever is waiting.
+    assert.ok(css.indexOf('.hue.is-thinking {') > css.indexOf('.hue {'));
+    assert.match(css, /\.hue\.is-thinking\s*\{[^}]*background:\s*radial-gradient/);
+    // The waiting colours are kept, not cleared, while thinking: showHue sets them whenever something is waiting.
+    assert.match(js, /hue\.classList\.toggle\('is-thinking', thinking\)/);
+    assert.match(js, /if \(stops\.length\) hue\.style\.setProperty\('--stops'/);
+    assert.match(js, /hue\.setAttribute\('aria-label', thinking \? 'Thinking' : attentionLabel\)/);
+  });
+
+  it('stop the strip moving when Windows asks for less motion, and keep it visible', () => {
+    const reduced = /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\r?\n\}/.exec(css)?.[1] ?? '';
+    assert.match(reduced, /\.hue\s*\{\s*animation:\s*none;?\s*\}/);
+    assert.match(reduced, /\.hue\.is-thinking\s*\{[^}]*animation:\s*none;[^}]*--glow:\s*45%/);
+    assert.equal(/\.hue[^{]*\{[^}]*(display:\s*none|opacity:\s*0)/.test(reduced), false, 'it is not hidden');
+  });
+
   it('keep the attention colours out of the conversation colours, so blue only ever means an acknowledgement in the strip', () => {
     // The strip's own rules are the only place the attention variables are used.
     const uses = [...css.matchAll(/var\(--attn-(\w+)\)/g)].map((m) => m[1]);
@@ -112,11 +129,6 @@ describe('the panel pages', () => {
   it('do not announce changes to a screen reader by themselves', () => {
     assert.equal(/id="attention"[^>]*aria-live/.test(html), false);
     assert.equal(/id="hue"[^>]*aria-live/.test(html), false);
-  });
-
-  it('slow the flowing motion, not stop it, for people who ask for less motion', () => {
-    assert.match(css, /prefers-reduced-motion[\s\S]*\.hue\s*\{\s*animation-duration:\s*16s/);
-    assert.equal(/prefers-reduced-motion[\s\S]*\.hue[^{]*\{[^}]*animation:\s*none/.test(css), false, 'the strip is slowed, never stopped, so a long wait always shows life');
   });
 
   it('let the person choose the employee from the panel itself, and hand only an id to the app', () => {

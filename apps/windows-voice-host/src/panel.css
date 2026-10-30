@@ -47,7 +47,9 @@ body {
   animation: hue-flow 4.2s linear infinite;
 }
 .hue[hidden] { display: none; }
-/* The same strip, thinking: bright orange in the middle, dark orange at both ends, the bright part breathing outwards. */
+/* The same strip, thinking: bright orange in the middle, dark orange at both ends, the bright part breathing outwards.
+   While the employee is thinking this takes the strip over: the waiting colours (still held in --stops) are not shown until it
+   stops, and then they come back. A long wait is more important to see than a waiting item that is already counted. */
 .hue.is-thinking {
   background: radial-gradient(ellipse farthest-side at 50% 50%, #ffd699 0%, #ff9a1f var(--glow), #8a3a00 100%);
   background-size: 100% 100%;
@@ -214,10 +216,10 @@ footer .js-mute { justify-self: end; margin-right: 22px; }
 
 @media (prefers-reduced-motion: reduce) {
   .orb .core, .orb .swirl, .ring, .call-rings { animation: none !important; }
-  /* The strip is how a long wait or a waiting item is shown, so it is not stopped: with animations switched off in Windows
-     it only moves much more slowly, and the glow just changes brightness. */
-  .hue { animation-duration: 16s; }
-  .hue.is-thinking { animation-duration: 3.6s; }
+  /* Windows is set to show less motion, so the strip does not move. Nothing is lost: what is waiting is still its colour, as a
+     still gradient, and thinking is still the orange glow, held at its middle brightness. The chip and dots say the same in words. */
+  .hue { animation: none; }
+  .hue.is-thinking { animation: none; --glow: 45%; }
   .scroll { scroll-behavior: auto; }
 }
 

@@ -43,8 +43,16 @@ app.whenReady().then(async () => {
   });
   const win = () => BrowserWindow.getAllWindows().find((w) => w.getTitle() === 'Cruz');
   const dom = (code) => win().webContents.executeJavaScript(code);
+  // The strip is ONE element whose gradient is made from the waiting kinds' colours, so this reads the kinds from it, in order.
   const strip = () =>
-    dom(`Array.from(document.querySelectorAll('#hue .seg')).map((s) => ({ kind: s.className.replace('seg seg-', ''), color: getComputedStyle(s).getPropertyValue('--c').trim(), width: Math.round(s.getBoundingClientRect().width), top: Math.round(s.getBoundingClientRect().top), height: Math.round(s.getBoundingClientRect().height) }))`);
+    dom(`(() => { const h = document.getElementById('hue'); if (h.hidden) return []; const r = h.getBoundingClientRect(); const root = getComputedStyle(document.documentElement); const kinds = []; for (const m of h.style.getPropertyValue('--stops').matchAll(/--attn-([a-z]+)/g)) if (!kinds.includes(m[1])) kinds.push(m[1]); return kinds.map((kind) => ({ kind, color: root.getPropertyValue('--attn-' + kind).trim(), width: Math.round(r.width), top: Math.round(r.top), height: Math.round(r.height) })); })()`);
+  const hueLook = () =>
+    dom(`(() => { const h = document.getElementById('hue'); const c = getComputedStyle(h); return { hidden: h.hidden, thinking: h.classList.contains('is-thinking'), image: c.backgroundImage.split('(')[0], animation: c.animationName, label: h.getAttribute('aria-label') }; })()`);
+  const setDisplay = async (display) => {
+    const state = await dom('lastState');
+    win().webContents.send('panel-state', { ...state, display });
+    await wait(200);
+  };
   const hueVisible = () =>
     dom(`(() => { const h = document.getElementById('hue'); const r = h.getBoundingClientRect(); return !h.hidden && r.height > 0 && getComputedStyle(h).display !== 'none'; })()`);
   const click = (id) => dom(`document.getElementById('${id}').click()`);
@@ -91,8 +99,47 @@ app.whenReady().then(async () => {
   s = await strip();
   check(s.map((x) => x.kind).join() === 'update,approval,acknowledgement,error', 'expanded: all four kinds show at once, none hiding another');
   check(s.every((x) => x.color === COLORS[x.kind]), 'with their own colours');
-  const widths = s.map((x) => x.width);
-  check(Math.max(...widths) - Math.min(...widths) <= 1, `in equal parts (${widths.join(', ')})`);
+  check(await dom(`document.querySelectorAll('#hue').length === 1 && document.querySelectorAll('#hue *').length === 0`), 'as ONE strip, not separate blocks');
+  check((await hueLook()).image === 'linear-gradient', 'drawn as one flowing gradient');
+  check(s.every((x) => x.width === s[0].width), 'across the whole width');
+
+  // 3b. Thinking takes the strip over while it lasts, whatever is waiting, and the waiting colours come back when it stops.
+  let look = await hueLook();
+  check(!look.thinking && look.image === 'linear-gradient' && look.animation === 'hue-flow', 'waiting: the colours flow');
+  await setDisplay('thinking');
+  look = await hueLook();
+  check(!look.hidden && look.thinking && look.image === 'radial-gradient' && look.label === 'Thinking', 'thinking: an orange glow replaces the waiting colours, and is named Thinking');
+  check(look.animation === 'hue-breathe', 'and it breathes');
+  await setDisplay('idle');
+  look = await hueLook();
+  s = await strip();
+  check(!look.thinking && look.image === 'linear-gradient' && s.map((x) => x.kind).join() === 'update,approval,acknowledgement,error', 'when thinking stops, all four waiting colours are back');
+  host.setAttention(counts({}));
+  await wait(300);
+  check((await hueLook()).hidden, 'nothing waiting and not thinking: no strip');
+  await setDisplay('thinking');
+  look = await hueLook();
+  check(!look.hidden && look.thinking, 'thinking with nothing waiting still shows the glow');
+  await setDisplay('idle');
+  host.setAttention(counts({ update: 2, approval: 1, acknowledgement: 1, error: 3 }));
+  await wait(300);
+
+  // 3c. Windows set to show less motion: the strip does not move, and is still there.
+  const dbg = win().webContents.debugger;
+  dbg.attach('1.3');
+  const motion = (value) => dbg.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value }] });
+  await motion('reduce');
+  await wait(200);
+  look = await hueLook();
+  check(!look.hidden && look.animation === 'none' && look.image === 'linear-gradient', 'less motion: the waiting colours are still, and still shown');
+  await setDisplay('thinking');
+  look = await hueLook();
+  check(!look.hidden && look.thinking && look.animation === 'none' && look.image === 'radial-gradient', 'less motion: the thinking glow is still, and still shown');
+  await setDisplay('idle');
+  await motion('no-preference');
+  await wait(200);
+  check((await hueLook()).animation === 'hue-flow', 'and with ordinary settings it flows again');
+  dbg.detach();
 
   // 4. Minimise with everything waiting: the strip stays, and the width and left edge do not change.
   await click('minimize');
