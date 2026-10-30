@@ -1,6 +1,6 @@
 {
   "name": "@cruzclaw/voice-core",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "type": "module",
   "description": "Versioned VoiceEmployeeHost contract, DTOs and conformance suite.",
